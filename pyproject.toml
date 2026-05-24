@@ -1,0 +1,18 @@
+[project]
+name = "video-downloader"
+version = "0.1.0"
+description = "CLI video downloader that can sniff playable video streams from a browser session."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "playwright>=1.44",
+  "requests>=2.31",
+  "yt-dlp>=2024.4.9",
+]
+
+[project.scripts]
+video-dl = "video_downloader.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
