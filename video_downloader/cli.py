@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .downloader import default_output_template, download_candidate, download_url
 from .models import StreamCandidate
+from .progress import ProgressReporter
 from .scoring import ad_score, content_score, is_likely_ad
 
 
@@ -17,7 +19,20 @@ def build_parser() -> argparse.ArgumentParser:
             "and sniffs network video streams such as HLS, DASH, and MP4."
         ),
     )
-    parser.add_argument("url", help="Page URL or direct media URL.")
+    parser.add_argument("url", nargs="?", help="Page URL or direct media URL.")
+    parser.add_argument(
+        "-i",
+        "--input-file",
+        default=None,
+        help="Text file containing one URL per line. Blank lines and # comments are ignored.",
+    )
+    parser.add_argument(
+        "-j",
+        "--parallel",
+        type=int,
+        default=1,
+        help="Maximum number of URLs to process at the same time when using --input-file.",
+    )
     parser.add_argument(
         "-o",
         "--output",
@@ -127,6 +142,25 @@ def select_candidate(
 
 
 def run_browser_mode(args: argparse.Namespace, output_template: str) -> int:
+    return run_browser_download(
+        args,
+        args.url,
+        output_template,
+        progress_reporter=None,
+        progress_label="single",
+        show_candidates=True,
+    )
+
+
+def run_browser_download(
+    args: argparse.Namespace,
+    url: str,
+    output_template: str,
+    *,
+    progress_reporter: ProgressReporter | None,
+    progress_label: str,
+    show_candidates: bool,
+) -> int:
     try:
         from .sniffer import sniff_streams
     except ModuleNotFoundError as exc:
@@ -138,20 +172,31 @@ def run_browser_mode(args: argparse.Namespace, output_template: str) -> int:
 
     if not args.quiet:
         browser_mode = "headed Chromium" if args.headed else "headless Chromium"
-        print(f"Opening page with {browser_mode}...")
-        print(f"Trying playback and sniffing streams for {args.play_seconds:g}s...")
+        message = (
+            f"Opening page with {browser_mode}; sniffing streams for "
+            f"{args.play_seconds:g}s..."
+        )
+        if progress_reporter:
+            progress_reporter.message(progress_label, message)
+        else:
+            print(message)
 
     candidates = sniff_streams(
-        args.url,
+        url,
         headless=not args.headed,
         user_agent=args.user_agent,
         play_seconds=args.play_seconds,
     )
 
     if not args.quiet:
-        print(f"Found {len(candidates)} stream candidate(s).")
+        message = f"Found {len(candidates)} stream candidate(s)."
+        if progress_reporter:
+            progress_reporter.message(progress_label, message)
+        else:
+            print(message)
 
-    print_candidates(candidates)
+    if show_candidates:
+        print_candidates(candidates)
     if args.list_only:
         return 0
 
@@ -165,22 +210,185 @@ def run_browser_mode(args: argparse.Namespace, output_template: str) -> int:
         return 2
 
     if args.print_url:
-        print(selected.url)
+        if progress_reporter:
+            progress_reporter.message(progress_label, selected.url)
+        else:
+            print(selected.url)
 
-    download_candidate(selected, output_template=output_template, quiet=args.quiet)
+    download_candidate(
+        selected,
+        output_template=output_template,
+        quiet=args.quiet or progress_reporter is not None,
+        progress_hook=progress_reporter.hook if progress_reporter else None,
+        progress_label=progress_label,
+    )
     return 0
 
 
 def run_ytdlp_mode(args: argparse.Namespace, output_template: str) -> int:
-    download_url(args.url, output_template=output_template, quiet=args.quiet)
+    return run_ytdlp_download(
+        args,
+        args.url,
+        output_template,
+        progress_reporter=None,
+        progress_label="single",
+    )
+
+
+def run_ytdlp_download(
+    args: argparse.Namespace,
+    url: str,
+    output_template: str,
+    *,
+    progress_reporter: ProgressReporter | None,
+    progress_label: str,
+) -> int:
+    download_url(
+        url,
+        output_template=output_template,
+        quiet=args.quiet or progress_reporter is not None,
+        progress_hook=progress_reporter.hook if progress_reporter else None,
+        progress_label=progress_label,
+    )
+    return 0
+
+
+def read_urls(path: str | Path) -> list[str]:
+    urls: list[str] = []
+    with Path(path).open("r", encoding="utf-8") as file:
+        for line in file:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            urls.append(stripped)
+    return urls
+
+
+def process_one_url(
+    args: argparse.Namespace,
+    url: str,
+    output_template: str,
+    *,
+    progress_reporter: ProgressReporter,
+    progress_label: str,
+) -> int:
+    try:
+        if args.mode == "browser":
+            return run_browser_download(
+                args,
+                url,
+                output_template,
+                progress_reporter=progress_reporter,
+                progress_label=progress_label,
+                show_candidates=args.list_only,
+            )
+
+        if args.mode == "ytdlp":
+            return run_ytdlp_download(
+                args,
+                url,
+                output_template,
+                progress_reporter=progress_reporter,
+                progress_label=progress_label,
+            )
+
+        try:
+            return run_browser_download(
+                args,
+                url,
+                output_template,
+                progress_reporter=progress_reporter,
+                progress_label=progress_label,
+                show_candidates=args.list_only,
+            )
+        except Exception as exc:
+            progress_reporter.message(
+                progress_label,
+                f"browser sniff failed: {exc}; falling back to yt-dlp",
+            )
+            return run_ytdlp_download(
+                args,
+                url,
+                output_template,
+                progress_reporter=progress_reporter,
+                progress_label=progress_label,
+            )
+    except Exception as exc:
+        progress_reporter.message(progress_label, f"failed: {exc}")
+        return 1
+
+
+def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
+    try:
+        urls = read_urls(args.input_file)
+    except OSError as exc:
+        print(f"Could not read {args.input_file}: {exc}", file=sys.stderr)
+        return 2
+    if not urls:
+        print(f"No URLs found in {args.input_file}.", file=sys.stderr)
+        return 2
+    if args.parallel < 1:
+        print("--parallel must be at least 1.", file=sys.stderr)
+        return 2
+    if args.headed and args.parallel > 1:
+        print("--headed with --parallel > 1 opens multiple visible browsers.", file=sys.stderr)
+
+    reporter = ProgressReporter(enabled=not args.quiet)
+    reporter.message(
+        "batch",
+        f"starting {len(urls)} URL(s) with parallel={args.parallel}",
+    )
+
+    failures = 0
+    with ThreadPoolExecutor(max_workers=args.parallel) as executor:
+        futures = {}
+        for index, url in enumerate(urls, start=1):
+            label = f"{index}/{len(urls)}"
+            futures[
+                executor.submit(
+                    process_one_url,
+                    args,
+                    url,
+                    output_template,
+                    progress_reporter=reporter,
+                    progress_label=label,
+                )
+            ] = label
+
+        for future in as_completed(futures):
+            label = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                reporter.message(label, f"failed: {exc}")
+                failures += 1
+                continue
+
+            if result == 0:
+                reporter.message(label, "done")
+            else:
+                failures += 1
+
+    if failures:
+        print(f"Completed with {failures} failure(s).", file=sys.stderr)
+        return 1
+    reporter.message("batch", "all done")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.input_file is None and args.url is None:
+        parser.error("provide a URL or --input-file")
+    if args.input_file is not None and args.url is not None:
+        parser.error("provide either a URL or --input-file, not both")
+
     output_template = args.output or default_output_template(args.output_dir)
     Path(output_template).parent.mkdir(parents=True, exist_ok=True)
+
+    if args.input_file:
+        return run_batch_mode(args, output_template)
 
     if args.mode == "browser":
         return run_browser_mode(args, output_template)

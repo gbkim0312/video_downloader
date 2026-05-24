@@ -53,6 +53,37 @@ video-dl "https://example.com/watch/123" --mode ytdlp
 video-dl "https://example.com/watch/123" -o "downloads/%(title)s.%(ext)s"
 ```
 
+여러 URL을 파일에서 읽어 다운로드:
+
+```bash
+video-dl --input-file sites.txt
+```
+
+`sites.txt`는 한 줄에 하나의 URL을 넣습니다. 빈 줄과 `#`로 시작하는 주석 줄은 무시합니다.
+
+```text
+https://example.com/watch/123
+https://example.com/watch/456
+# https://example.com/watch/skip
+https://example.com/watch/789
+```
+
+동시에 3개까지 병렬 처리:
+
+```bash
+video-dl --input-file sites.txt --parallel 3
+```
+
+배치 모드에서는 각 작업의 다운로드 진행 상황을 MB 단위로 출력합니다. 전체 파일 크기를 알 수 없는 스트림은 `? MB`로 표시합니다.
+
+```text
+[batch] starting 3 URL(s) with parallel=2
+[1/3] Opening page with headless Chromium; sniffing streams for 25s...
+[2/3] downloading 18.4 MB / ? MB at 3.1 MB/s
+[2/3] downloaded 143.8 MB, processing...
+[2/3] done
+```
+
 ## 광고 스트림 구분 방식
 
 광고 판별은 완벽한 보장이 아니라 휴리스틱입니다. 다음 신호를 조합합니다.

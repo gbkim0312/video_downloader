@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Callable
 
 from .models import StreamCandidate
+
+
+ProgressHook = Callable[[str, dict[str, Any]], None]
 
 
 def default_output_template(output_dir: str | Path) -> str:
@@ -16,6 +20,8 @@ def download_url(
     output_template: str,
     headers: dict[str, str] | None = None,
     quiet: bool = False,
+    progress_hook: ProgressHook | None = None,
+    progress_label: str = "",
 ) -> None:
     try:
         from yt_dlp import YoutubeDL
@@ -35,6 +41,10 @@ def download_url(
         "fragment_retries": 8,
         "concurrent_fragment_downloads": 4,
     }
+    if progress_hook:
+        options["progress_hooks"] = [
+            lambda status: progress_hook(progress_label or url, status)
+        ]
     if headers:
         options["http_headers"] = headers
 
@@ -47,6 +57,8 @@ def download_candidate(
     *,
     output_template: str,
     quiet: bool = False,
+    progress_hook: ProgressHook | None = None,
+    progress_label: str = "",
 ) -> None:
     headers = {}
     if candidate.user_agent:
@@ -58,4 +70,6 @@ def download_candidate(
         output_template=output_template,
         headers=headers,
         quiet=quiet,
+        progress_hook=progress_hook,
+        progress_label=progress_label,
     )
