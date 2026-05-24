@@ -136,12 +136,21 @@ def run_browser_mode(args: argparse.Namespace, output_template: str) -> int:
             "and run `python -m playwright install chromium`."
         ) from exc
 
+    if not args.quiet:
+        browser_mode = "headed Chromium" if args.headed else "headless Chromium"
+        print(f"Opening page with {browser_mode}...")
+        print(f"Trying playback and sniffing streams for {args.play_seconds:g}s...")
+
     candidates = sniff_streams(
         args.url,
         headless=not args.headed,
         user_agent=args.user_agent,
         play_seconds=args.play_seconds,
     )
+
+    if not args.quiet:
+        print(f"Found {len(candidates)} stream candidate(s).")
+
     print_candidates(candidates)
     if args.list_only:
         return 0
