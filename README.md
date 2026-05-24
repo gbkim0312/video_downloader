@@ -74,13 +74,12 @@ https://example.com/watch/789
 video-dl --input-file sites.txt --parallel 3
 ```
 
-배치 모드에서는 각 작업의 다운로드 진행 상황을 MB 단위로 출력합니다. 전체 파일 크기를 알 수 없는 스트림은 `? MB`로 표시합니다.
+배치 모드에서는 전체 작업 수와 각 다운로드의 진행바를 MB 단위로 출력합니다. 전체 파일 크기를 알 수 없는 스트림은 진행된 MB와 속도를 계속 갱신합니다.
 
 ```text
-[batch] starting 3 URL(s) with parallel=2
 [1/3] Opening page with headless Chromium; sniffing streams for 25s...
-[2/3] downloading 18.4 MB / ? MB at 3.1 MB/s
-[2/3] downloaded 143.8 MB, processing...
+batch:  33%|████████████████                  | 1/3 [00:35<01:10, 35.1s/file]
+2/3:    42%|███████████████                   | 84.0/200.0 MB [3.1 MB/s]
 [2/3] done
 ```
 

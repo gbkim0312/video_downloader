@@ -333,41 +333,46 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
     if args.headed and args.parallel > 1:
         print("--headed with --parallel > 1 opens multiple visible browsers.", file=sys.stderr)
 
-    reporter = ProgressReporter(enabled=not args.quiet)
+    reporter = ProgressReporter(enabled=not args.quiet, total_jobs=len(urls))
     reporter.message(
         "batch",
         f"starting {len(urls)} URL(s) with parallel={args.parallel}",
     )
 
     failures = 0
-    with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-        futures = {}
-        for index, url in enumerate(urls, start=1):
-            label = f"{index}/{len(urls)}"
-            futures[
-                executor.submit(
-                    process_one_url,
-                    args,
-                    url,
-                    output_template,
-                    progress_reporter=reporter,
-                    progress_label=label,
-                )
-            ] = label
+    try:
+        with ThreadPoolExecutor(max_workers=args.parallel) as executor:
+            futures = {}
+            for index, url in enumerate(urls, start=1):
+                label = f"{index}/{len(urls)}"
+                futures[
+                    executor.submit(
+                        process_one_url,
+                        args,
+                        url,
+                        output_template,
+                        progress_reporter=reporter,
+                        progress_label=label,
+                    )
+                ] = label
 
-        for future in as_completed(futures):
-            label = futures[future]
-            try:
-                result = future.result()
-            except Exception as exc:
-                reporter.message(label, f"failed: {exc}")
-                failures += 1
-                continue
+            for future in as_completed(futures):
+                label = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    reporter.message(label, f"failed: {exc}")
+                    failures += 1
+                    reporter.complete_job(label)
+                    continue
 
-            if result == 0:
-                reporter.message(label, "done")
-            else:
-                failures += 1
+                if result == 0:
+                    reporter.message(label, "done")
+                else:
+                    failures += 1
+                reporter.complete_job(label)
+    finally:
+        reporter.close()
 
     if failures:
         print(f"Completed with {failures} failure(s).", file=sys.stderr)
