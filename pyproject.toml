@@ -14,6 +14,10 @@ dependencies = [
 [project.scripts]
 video-dl = "video_downloader.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["video_downloader*"]
+exclude = ["downloads*"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
