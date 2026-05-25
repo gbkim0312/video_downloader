@@ -78,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show Chromium. Useful for pages that need login, consent, or manual play.",
     )
     parser.add_argument(
+        "--allow-popups",
+        action="store_true",
+        help="Allow new tabs/popups. By default they are closed and known ad requests are blocked.",
+    )
+    parser.add_argument(
         "--user-agent",
         default=None,
         help="Override browser user agent.",
@@ -240,6 +245,7 @@ def run_browser_download(
         headless=not args.headed,
         user_agent=args.user_agent,
         play_seconds=args.play_seconds,
+        allow_popups=args.allow_popups,
     )
 
     if not args.quiet:
@@ -340,6 +346,7 @@ def run_link_extraction(args: argparse.Namespace) -> int:
         user_agent=args.user_agent,
         min_score=args.link_min_score,
         wait_seconds=args.link_wait_seconds,
+        allow_popups=args.allow_popups,
     )
 
     if args.links_output:

@@ -8,6 +8,7 @@ from collections.abc import Iterable
 
 from playwright.async_api import Browser, BrowserContext, Page, Response, async_playwright
 
+from .browser_protection import install_popup_protection
 from .models import StreamCandidate
 from .scoring import content_score
 
@@ -95,10 +96,12 @@ class BrowserStreamSniffer:
         headless: bool = True,
         user_agent: str | None = None,
         play_seconds: float = 25,
+        allow_popups: bool = False,
     ) -> None:
         self.headless = headless
         self.user_agent = user_agent
         self.play_seconds = play_seconds
+        self.allow_popups = allow_popups
 
     async def sniff(self, url: str) -> list[StreamCandidate]:
         started = time.monotonic()
@@ -111,7 +114,7 @@ class BrowserStreamSniffer:
                 user_agent=self.user_agent,
                 viewport={"width": 1365, "height": 900},
             )
-            page = await context.new_page()
+            await install_popup_protection(context, allow_popups=self.allow_popups)
 
             def schedule(response: Response) -> None:
                 task = asyncio.create_task(
@@ -120,7 +123,12 @@ class BrowserStreamSniffer:
                 pending.add(task)
                 task.add_done_callback(pending.discard)
 
-            page.on("response", schedule)
+            def attach_page(page: Page) -> None:
+                page.on("response", schedule)
+
+            context.on("page", attach_page)
+            page = await context.new_page()
+            attach_page(page)
             await self._open_and_play(page, url)
             await page.wait_for_timeout(int(self.play_seconds * 1000))
 
@@ -219,10 +227,12 @@ def sniff_streams(
     headless: bool = True,
     user_agent: str | None = None,
     play_seconds: float = 25,
+    allow_popups: bool = False,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
         user_agent=user_agent,
         play_seconds=play_seconds,
+        allow_popups=allow_popups,
     )
     return asyncio.run(sniffer.sniff(url))
