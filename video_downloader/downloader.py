@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 from .models import StreamCandidate
@@ -9,8 +10,17 @@ from .models import StreamCandidate
 ProgressHook = Callable[[str, dict[str, Any]], None]
 
 
-def default_output_template(output_dir: str | Path) -> str:
+def sanitize_filename(value: str, *, max_length: int = 200) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", value)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return cleaned[:max_length].strip(" .")
+
+
+def default_output_template(output_dir: str | Path, title: str = "") -> str:
     path = Path(output_dir)
+    safe_title = sanitize_filename(title)
+    if safe_title:
+        return str(path / f"{safe_title}.%(ext)s")
     return str(path / "%(title).200B.%(ext)s")
 
 

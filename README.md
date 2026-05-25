@@ -53,6 +53,8 @@ video-dl "https://example.com/watch/123" --mode ytdlp
 video-dl "https://example.com/watch/123" -o "downloads/%(title)s.%(ext)s"
 ```
 
+브라우저 감지 모드의 기본 파일명은 페이지 제목을 우선 사용합니다. 페이지 제목을 찾지 못하면 `yt-dlp`가 추출한 제목인 `%(title).200B.%(ext)s` 형식으로 저장합니다. 직접 템플릿을 지정하려면 `-o`를 사용하면 됩니다.
+
 여러 URL을 파일에서 읽어 다운로드:
 
 ```bash

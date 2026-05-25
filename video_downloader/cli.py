@@ -215,9 +215,21 @@ def run_browser_download(
         else:
             print(selected.url)
 
+    selected_output = output_template
+    if args.output is None and selected.page_title:
+        selected_output = default_output_template(args.output_dir, selected.page_title)
+        Path(selected_output).parent.mkdir(parents=True, exist_ok=True)
+        if progress_reporter:
+            progress_reporter.message(
+                progress_label,
+                f"Using page title for filename: {selected.page_title}",
+            )
+        elif not args.quiet:
+            print(f"Using page title for filename: {selected.page_title}")
+
     download_candidate(
         selected,
-        output_template=output_template,
+        output_template=selected_output,
         quiet=args.quiet or progress_reporter is not None,
         progress_hook=progress_reporter.hook if progress_reporter else None,
         progress_label=progress_label,

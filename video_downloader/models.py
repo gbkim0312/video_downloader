@@ -12,6 +12,7 @@ class StreamCandidate:
     resource_type: str = ""
     referer: str = ""
     user_agent: str = ""
+    page_title: str = ""
     duration: float | None = None
     byte_length: int | None = None
     discovered_at: float = 0.0

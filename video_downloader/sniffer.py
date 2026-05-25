@@ -127,6 +127,12 @@ class BrowserStreamSniffer:
             if pending:
                 await asyncio.wait(pending, timeout=10)
 
+            page_title = (await page.title()).strip()
+            if page_title:
+                for candidate in candidates:
+                    if not candidate.page_title:
+                        candidate.page_title = page_title
+
             await self._close(context, browser)
 
         unique = dedupe_candidates(candidates)
