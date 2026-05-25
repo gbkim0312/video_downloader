@@ -93,6 +93,21 @@ batch:  33%|████████████████                  | 
 [2/3] done
 ```
 
+재생목록/목록 페이지에서 영상 페이지 링크만 추출:
+
+```bash
+video-dl "https://example.com/playlist/abc" --extract-links
+```
+
+추출한 링크를 `sites.txt`로 저장한 뒤 배치 다운로드:
+
+```bash
+video-dl "https://example.com/playlist/abc" --extract-links --links-output sites.txt
+video-dl --input-file sites.txt --parallel 3
+```
+
+링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
+
 ## 광고 스트림 구분 방식
 
 광고 판별은 완벽한 보장이 아니라 휴리스틱입니다. 다음 신호를 조합합니다.

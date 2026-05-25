@@ -105,6 +105,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reduce yt-dlp output.",
     )
+    parser.add_argument(
+        "--extract-links",
+        action="store_true",
+        help="Extract likely video page links from a playlist/index page instead of downloading.",
+    )
+    parser.add_argument(
+        "--links-output",
+        default=None,
+        help="Write extracted video links to this text file.",
+    )
+    parser.add_argument(
+        "--link-min-score",
+        type=int,
+        default=6,
+        help="Minimum score for extracted links. Lower values include more links.",
+    )
+    parser.add_argument(
+        "--link-wait-seconds",
+        type=float,
+        default=3,
+        help="Seconds to wait after opening a link extraction page.",
+    )
     return parser
 
 
@@ -275,6 +297,46 @@ def run_ytdlp_download(
         progress_hook=progress_reporter.hook if progress_reporter else None,
         progress_label=progress_label,
     )
+    return 0
+
+
+def run_link_extraction(args: argparse.Namespace) -> int:
+    try:
+        from .link_extractor import extract_video_links
+    except ModuleNotFoundError as exc:
+        missing = exc.name or "playwright"
+        raise RuntimeError(
+            f"Missing dependency: {missing}. Install with `pip install -e .` "
+            "and run `python -m playwright install chromium`."
+        ) from exc
+
+    if not args.quiet:
+        browser_mode = "headed Chromium" if args.headed else "headless Chromium"
+        print(f"Opening page with {browser_mode}; extracting video links...")
+
+    links = extract_video_links(
+        args.url,
+        headless=not args.headed,
+        user_agent=args.user_agent,
+        min_score=args.link_min_score,
+        wait_seconds=args.link_wait_seconds,
+    )
+
+    if args.links_output:
+        output = Path(args.links_output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            "\n".join(candidate.url for candidate in links) + ("\n" if links else ""),
+            encoding="utf-8",
+        )
+        if not args.quiet:
+            print(f"Wrote {len(links)} link(s) to {output}")
+    else:
+        for candidate in links:
+            print(candidate.url)
+
+    if not args.quiet and not links:
+        print("No likely video links found.")
     return 0
 
 
@@ -458,11 +520,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("provide a URL or --input-file")
     if args.input_file is not None and args.url is not None:
         parser.error("provide either a URL or --input-file, not both")
+    if args.extract_links and args.input_file is not None:
+        parser.error("--extract-links works with a page URL, not --input-file")
 
     output_template = args.output or default_output_template(args.output_dir)
     Path(output_template).parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        if args.extract_links:
+            return run_link_extraction(args)
+
         if args.input_file:
             return run_batch_mode(args, output_template)
 
