@@ -69,6 +69,27 @@ def ad_score(candidate: StreamCandidate) -> int:
     return score
 
 
+def has_ad_markers(candidate: StreamCandidate) -> bool:
+    parsed = urlparse(candidate.url)
+    haystack = " ".join(
+        [
+            parsed.hostname or "",
+            parsed.path,
+            parsed.query,
+            candidate.content_type,
+            candidate.resource_type,
+        ]
+    ).lower()
+    if any(keyword in haystack for keyword in AD_KEYWORDS):
+        return True
+
+    params = parse_qs(parsed.query.lower())
+    return any(
+        key in params
+        for key in ("ad_type", "adunit", "iu", "cust_params", "correlator")
+    )
+
+
 def content_score(candidate: StreamCandidate) -> int:
     parsed = urlparse(candidate.url)
     haystack = " ".join([parsed.path, parsed.query, candidate.content_type]).lower()
@@ -104,3 +125,12 @@ def content_score(candidate: StreamCandidate) -> int:
 
 def is_likely_ad(candidate: StreamCandidate, threshold: int = 4) -> bool:
     return ad_score(candidate) >= threshold and content_score(candidate) < 10
+
+
+def is_short_duration_only_ad(candidate: StreamCandidate) -> bool:
+    return (
+        candidate.duration is not None
+        and candidate.duration <= 120
+        and is_likely_ad(candidate)
+        and not has_ad_markers(candidate)
+    )

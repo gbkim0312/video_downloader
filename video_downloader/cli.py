@@ -9,7 +9,7 @@ from pathlib import Path
 from .downloader import default_output_template, download_candidate, download_url
 from .models import StreamCandidate
 from .progress import ProgressReporter
-from .scoring import ad_score, content_score, is_likely_ad
+from .scoring import ad_score, content_score, is_likely_ad, is_short_duration_only_ad
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of URLs to process at the same time when using --input-file.",
     )
     parser.add_argument(
+        "-r",
         "--retries",
         type=int,
         default=3,
@@ -48,22 +49,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-o",
-        "--output",
+        "--output-dir",
+        default="downloads",
+        help="Directory to save downloads. Default: downloads.",
+    )
+    parser.add_argument(
+        "--output-template",
         default=None,
         help="yt-dlp output template. Defaults to downloads/%%(title).200B.%%(ext)s",
     )
     parser.add_argument(
-        "--output-dir",
-        default="downloads",
-        help="Directory used when --output is not supplied.",
-    )
-    parser.add_argument(
+        "-m",
         "--mode",
         choices=("auto", "browser", "ytdlp"),
         default="auto",
         help="auto/browser/ytdlp. Default: auto.",
     )
     parser.add_argument(
+        "-s",
         "--play-seconds",
         type=float,
         default=25,
@@ -85,12 +88,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow ad-looking streams to be selected.",
     )
     parser.add_argument(
+        "--allow-short",
+        action="store_true",
+        help="Do not exclude streams only because they are very short.",
+    )
+    parser.add_argument(
+        "-c",
         "--candidate",
         type=int,
         default=1,
         help="1-based stream candidate index to download after scoring.",
     )
     parser.add_argument(
+        "-l",
         "--list-only",
         action="store_true",
         help="Print stream candidates without downloading.",
@@ -101,11 +111,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the selected stream URL before downloading.",
     )
     parser.add_argument(
+        "-q",
         "--quiet",
         action="store_true",
         help="Reduce yt-dlp output.",
     )
     parser.add_argument(
+        "-x",
         "--extract-links",
         action="store_true",
         help="Extract likely video page links from a playlist/index page instead of downloading.",
@@ -162,11 +174,18 @@ def select_candidate(
     candidates: list[StreamCandidate],
     *,
     include_ads: bool,
+    allow_short: bool,
     candidate_index: int,
 ) -> StreamCandidate | None:
-    selectable = candidates if include_ads else [
-        candidate for candidate in candidates if not is_likely_ad(candidate)
-    ]
+    if include_ads:
+        selectable = candidates
+    else:
+        selectable = [
+            candidate
+            for candidate in candidates
+            if not is_likely_ad(candidate)
+            or (allow_short and is_short_duration_only_ad(candidate))
+        ]
     if not selectable:
         return None
     if candidate_index < 1 or candidate_index > len(selectable):
@@ -238,6 +257,7 @@ def run_browser_download(
     selected = select_candidate(
         candidates,
         include_ads=args.include_ads,
+        allow_short=args.allow_short,
         candidate_index=args.candidate,
     )
     if selected is None:
@@ -251,7 +271,7 @@ def run_browser_download(
             print(selected.url)
 
     selected_output = output_template
-    if args.output is None and selected.page_title:
+    if args.output_template is None and selected.page_title:
         selected_output = default_output_template(args.output_dir, selected.page_title)
         Path(selected_output).parent.mkdir(parents=True, exist_ok=True)
         if progress_reporter:
@@ -523,7 +543,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.extract_links and args.input_file is not None:
         parser.error("--extract-links works with a page URL, not --input-file")
 
-    output_template = args.output or default_output_template(args.output_dir)
+    output_template = args.output_template or default_output_template(args.output_dir)
     Path(output_template).parent.mkdir(parents=True, exist_ok=True)
 
     try:

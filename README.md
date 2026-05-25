@@ -26,34 +26,46 @@ video-dl "https://example.com/watch/123"
 후보만 확인:
 
 ```bash
-video-dl "https://example.com/watch/123" --list-only
+video-dl "https://example.com/watch/123" -l
 ```
 
 브라우저를 직접 보면서 로그인, 쿠키 동의, 재생 버튼 클릭이 필요한 페이지 처리:
 
 ```bash
-video-dl "https://example.com/watch/123" --headed --play-seconds 45
+video-dl "https://example.com/watch/123" --headed -s 45
 ```
 
 광고로 보이는 후보까지 포함해서 두 번째 후보 다운로드:
 
 ```bash
-video-dl "https://example.com/watch/123" --include-ads --candidate 2
+video-dl "https://example.com/watch/123" --include-ads -c 2
+```
+
+5초짜리 클립처럼 짧은 영상이 광고로 제외될 때:
+
+```bash
+video-dl "https://example.com/watch/123" --allow-short
 ```
 
 `yt-dlp`의 일반 페이지 추출기로 바로 다운로드:
 
 ```bash
-video-dl "https://example.com/watch/123" --mode ytdlp
+video-dl "https://example.com/watch/123" -m ytdlp
+```
+
+출력 디렉토리 지정:
+
+```bash
+video-dl "https://example.com/watch/123" -o videos
 ```
 
 출력 템플릿 지정:
 
 ```bash
-video-dl "https://example.com/watch/123" -o "downloads/%(title)s.%(ext)s"
+video-dl "https://example.com/watch/123" --output-template "videos/%(title)s.%(ext)s"
 ```
 
-브라우저 감지 모드의 기본 파일명은 페이지 제목을 우선 사용합니다. 페이지 제목을 찾지 못하면 `yt-dlp`가 추출한 제목인 `%(title).200B.%(ext)s` 형식으로 저장합니다. 직접 템플릿을 지정하려면 `-o`를 사용하면 됩니다.
+브라우저 감지 모드의 기본 파일명은 페이지 제목을 우선 사용합니다. 페이지 제목을 찾지 못하면 `yt-dlp`가 추출한 제목인 `%(title).200B.%(ext)s` 형식으로 저장합니다. 직접 템플릿을 지정하려면 `--output-template`을 사용하면 됩니다.
 
 여러 URL을 파일에서 읽어 다운로드:
 
@@ -73,13 +85,13 @@ https://example.com/watch/789
 동시에 3개까지 병렬 처리:
 
 ```bash
-video-dl --input-file sites.txt --parallel 3
+video-dl -i sites.txt -j 3
 ```
 
 실패한 URL만 재시도합니다. 기본값은 실패 후 3번 재시도이며, `--retries`로 조정할 수 있습니다.
 
 ```bash
-video-dl --input-file sites.txt --parallel 3 --retries 5
+video-dl -i sites.txt -j 3 -r 5
 ```
 
 `Ctrl+C`를 누르면 새 작업과 재시도를 중단하고 진행바를 정리한 뒤 종료합니다.
@@ -96,17 +108,34 @@ batch:  33%|████████████████                  | 
 재생목록/목록 페이지에서 영상 페이지 링크만 추출:
 
 ```bash
-video-dl "https://example.com/playlist/abc" --extract-links
+video-dl "https://example.com/playlist/abc" -x
 ```
 
 추출한 링크를 `sites.txt`로 저장한 뒤 배치 다운로드:
 
 ```bash
-video-dl "https://example.com/playlist/abc" --extract-links --links-output sites.txt
-video-dl --input-file sites.txt --parallel 3
+video-dl "https://example.com/playlist/abc" -x --links-output sites.txt
+video-dl -i sites.txt -j 3
 ```
 
 링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
+
+## 자주 쓰는 옵션
+
+| 옵션 | 설명 |
+| --- | --- |
+| `-o`, `--output-dir` | 다운로드 저장 디렉토리 |
+| `-i`, `--input-file` | 한 줄에 하나씩 URL이 있는 파일 |
+| `-j`, `--parallel` | 배치 다운로드 동시 실행 수 |
+| `-r`, `--retries` | 실패 URL 재시도 횟수 |
+| `-l`, `--list-only` | 스트림 후보만 출력 |
+| `-c`, `--candidate` | 다운로드할 후보 번호 |
+| `-m`, `--mode` | `auto`, `browser`, `ytdlp` 중 선택 |
+| `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |
+| `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
+| `-q`, `--quiet` | 출력 줄이기 |
+| `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |
+| `--output-template` | `yt-dlp` 출력 파일명 템플릿 직접 지정 |
 
 ## 광고 스트림 구분 방식
 
