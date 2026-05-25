@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from .browser_protection import install_popup_protection
+from .browser_protection import install_popup_protection, looks_like_ad_popup_url
 
 
 VIDEO_URL_HINTS = (
@@ -41,6 +41,9 @@ class LinkCandidate:
 
 
 def score_link(url: str, text: str, has_thumbnail: bool) -> int:
+    if looks_like_ad_popup_url(url):
+        return -100
+
     parsed = urlparse(url)
     haystack = " ".join([parsed.path, parsed.query, text]).lower()
     score = 0
@@ -117,6 +120,8 @@ async def _extract_links(
     candidates = []
     for row in rows:
         link_url = row.get("url", "")
+        if looks_like_ad_popup_url(link_url):
+            continue
         text = row.get("text", "")
         has_thumbnail = bool(row.get("hasThumbnail"))
         score = score_link(link_url, text, has_thumbnail)

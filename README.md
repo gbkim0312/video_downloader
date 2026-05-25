@@ -59,6 +59,12 @@ video-dl "https://example.com/watch/123" --allow-short
 video-dl "https://example.com/watch/123" -m ytdlp
 ```
 
+기본 `auto` 모드는 브라우저 감지에서 스트림 후보를 하나도 찾지 못한 경우에만 `yt-dlp` 페이지 추출로 fallback합니다. 후보를 찾은 뒤 다운로드가 실패한 경우에는 fallback하지 않고 실패로 처리해 배치 재시도 대상에 넣습니다. fallback을 완전히 끄려면:
+
+```bash
+video-dl "https://example.com/watch/123" --no-fallback
+```
+
 출력 디렉토리 지정:
 
 ```bash
@@ -124,7 +130,7 @@ video-dl "https://example.com/playlist/abc" -x --links-output sites.txt
 video-dl -i sites.txt -j 3
 ```
 
-링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
+링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 명확한 광고/팝업 URL은 제외합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
 
 ## 자주 쓰는 옵션
 
@@ -137,6 +143,7 @@ video-dl -i sites.txt -j 3
 | `-l`, `--list-only` | 스트림 후보만 출력 |
 | `-c`, `--candidate` | 다운로드할 후보 번호 |
 | `-m`, `--mode` | `auto`, `browser`, `ytdlp` 중 선택 |
+| `--no-fallback` | 브라우저 감지 실패 시 `yt-dlp` fallback 끄기 |
 | `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-q`, `--quiet` | 출력 줄이기 |

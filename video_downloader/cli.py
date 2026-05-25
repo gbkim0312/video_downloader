@@ -18,6 +18,12 @@ class BatchJob:
     url: str
 
 
+class NoStreamCandidatesError(RuntimeError):
+    def __init__(self, url: str) -> None:
+        super().__init__(f"no stream candidates found for {url}")
+        self.url = url
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="video-dl",
@@ -64,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "browser", "ytdlp"),
         default="auto",
         help="auto/browser/ytdlp. Default: auto.",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="In auto mode, do not fall back to yt-dlp when browser sniff finds no streams.",
     )
     parser.add_argument(
         "-s",
@@ -259,6 +270,8 @@ def run_browser_download(
         print_candidates(candidates)
     if args.list_only:
         return 0
+    if not candidates:
+        raise NoStreamCandidatesError(url)
 
     selected = select_candidate(
         candidates,
@@ -267,7 +280,14 @@ def run_browser_download(
         candidate_index=args.candidate,
     )
     if selected is None:
-        print("No non-ad stream candidate found. Try --include-ads or --headed.", file=sys.stderr)
+        message = (
+            "No non-ad stream candidate found. "
+            f"Try --include-ads or --headed. url={url}"
+        )
+        if progress_reporter:
+            progress_reporter.message(progress_label, message)
+        else:
+            print(message, file=sys.stderr)
         return 2
 
     if args.print_url:
@@ -324,6 +344,41 @@ def run_ytdlp_download(
         progress_label=progress_label,
     )
     return 0
+
+
+def run_auto_download(
+    args: argparse.Namespace,
+    url: str,
+    output_template: str,
+    *,
+    progress_reporter: ProgressReporter | None,
+    progress_label: str,
+    show_candidates: bool,
+) -> int:
+    try:
+        return run_browser_download(
+            args,
+            url,
+            output_template,
+            progress_reporter=progress_reporter,
+            progress_label=progress_label,
+            show_candidates=show_candidates,
+        )
+    except NoStreamCandidatesError:
+        if args.no_fallback:
+            raise
+        message = "no browser streams found; falling back to yt-dlp"
+        if progress_reporter:
+            progress_reporter.message(progress_label, f"{message} url={url}")
+        else:
+            print(f"{message}: {url}", file=sys.stderr)
+        return run_ytdlp_download(
+            args,
+            url,
+            output_template,
+            progress_reporter=progress_reporter,
+            progress_label=progress_label,
+        )
 
 
 def run_link_extraction(args: argparse.Namespace) -> int:
@@ -406,29 +461,16 @@ def process_one_url(
                 progress_label=progress_label,
             )
 
-        try:
-            return run_browser_download(
-                args,
-                url,
-                output_template,
-                progress_reporter=progress_reporter,
-                progress_label=progress_label,
-                show_candidates=args.list_only,
-            )
-        except Exception as exc:
-            progress_reporter.message(
-                progress_label,
-                f"browser sniff failed: {exc}; falling back to yt-dlp",
-            )
-            return run_ytdlp_download(
-                args,
-                url,
-                output_template,
-                progress_reporter=progress_reporter,
-                progress_label=progress_label,
-            )
+        return run_auto_download(
+            args,
+            url,
+            output_template,
+            progress_reporter=progress_reporter,
+            progress_label=progress_label,
+            show_candidates=args.list_only,
+        )
     except Exception as exc:
-        progress_reporter.message(progress_label, f"failed: {exc}")
+        progress_reporter.message(progress_label, f"failed: {exc} url={url}")
         return 1
 
 
@@ -497,7 +539,7 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
                 try:
                     result = future.result()
                 except Exception as exc:
-                    reporter.message(label, f"failed: {exc}")
+                    reporter.message(label, f"failed: {exc} url={job.url}")
                     result = 1
 
                 if result == 0:
@@ -509,9 +551,9 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
                 reporter.close_bar(label)
                 if attempt <= args.retries:
                     failed_jobs.append(job)
-                    reporter.message(label, "will retry")
+                    reporter.message(label, f"will retry url={job.url}")
                 else:
-                    reporter.message(label, "failed after retries")
+                    reporter.message(label, f"failed after retries url={job.url}")
                     reporter.complete_job(label)
 
             executor.shutdown(wait=True)
@@ -566,12 +608,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "ytdlp":
             return run_ytdlp_mode(args, output_template)
 
-        try:
-            return run_browser_mode(args, output_template)
-        except Exception as exc:
-            print(f"Browser sniff failed: {exc}", file=sys.stderr)
-            print("Falling back to yt-dlp page extraction.", file=sys.stderr)
-            return run_ytdlp_mode(args, output_template)
+        return run_auto_download(
+            args,
+            args.url,
+            output_template,
+            progress_reporter=None,
+            progress_label="single",
+            show_candidates=True,
+        )
     except KeyboardInterrupt:
         print("Interrupted by user.", file=sys.stderr)
         return 130
