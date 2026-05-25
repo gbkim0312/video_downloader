@@ -572,10 +572,14 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
 
     failures = len(urls) - len(completed)
     if failures:
+        failed_final = [job for job in jobs if job.index not in completed]
         print(
             f"Completed with {failures} failure(s) after {args.retries} retry attempt(s).",
             file=sys.stderr,
         )
+        print("Failed URLs:", file=sys.stderr)
+        for job in failed_final:
+            print(f"{job.index}: {job.url}", file=sys.stderr)
         return 1
     if not args.quiet:
         print("All downloads completed.")
