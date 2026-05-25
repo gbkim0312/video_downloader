@@ -85,11 +85,19 @@ class ProgressReporter:
         if not self.enabled:
             return
         with self._lock:
+            self.close_bar(label)
+            if self._overall:
+                self._overall.update(1)
+
+    def close_bar(self, label: str) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
             bar = self._bars.pop(label, None)
             if bar:
                 bar.close()
-            if self._overall:
-                self._overall.update(1)
+            self._last_downloaded.pop(label, None)
+            self._last_updated.pop(label, None)
 
     def hook(self, label: str, status: dict[str, Any]) -> None:
         if not self.enabled:

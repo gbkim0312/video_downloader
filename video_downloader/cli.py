@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import argparse
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 from .downloader import default_output_template, download_candidate, download_url
 from .models import StreamCandidate
 from .progress import ProgressReporter
 from .scoring import ad_score, content_score, is_likely_ad
+
+
+@dataclass(frozen=True, slots=True)
+class BatchJob:
+    index: int
+    url: str
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Maximum number of URLs to process at the same time when using --input-file.",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help="Retry failed URLs this many times after the first attempt. Default: 3.",
     )
     parser.add_argument(
         "-o",
@@ -342,54 +355,99 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
     if args.parallel < 1:
         print("--parallel must be at least 1.", file=sys.stderr)
         return 2
+    if args.retries < 0:
+        print("--retries must be at least 0.", file=sys.stderr)
+        return 2
     if args.headed and args.parallel > 1:
         print("--headed with --parallel > 1 opens multiple visible browsers.", file=sys.stderr)
 
     reporter = ProgressReporter(enabled=not args.quiet, total_jobs=len(urls))
     reporter.message(
         "batch",
-        f"starting {len(urls)} URL(s) with parallel={args.parallel}",
+        (
+            f"starting {len(urls)} URL(s) with parallel={args.parallel}, "
+            f"retries={args.retries}"
+        ),
     )
 
-    failures = 0
+    jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
+    failed_jobs = jobs
+    completed: set[int] = set()
+    interrupted = False
+    executor: ThreadPoolExecutor | None = None
     try:
-        with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-            futures = {}
-            for index, url in enumerate(urls, start=1):
-                label = f"{index}/{len(urls)}"
+        for attempt in range(1, args.retries + 2):
+            if not failed_jobs:
+                break
+
+            current_jobs = failed_jobs
+            failed_jobs = []
+            if attempt > 1:
+                reporter.message(
+                    "batch",
+                    f"retry {attempt - 1}/{args.retries}: {len(current_jobs)} failed URL(s)",
+                )
+
+            executor = ThreadPoolExecutor(max_workers=args.parallel)
+            futures: dict[Future[int], tuple[BatchJob, str]] = {}
+            for job in current_jobs:
+                label = f"{job.index}/{len(urls)} try {attempt}"
                 futures[
                     executor.submit(
                         process_one_url,
                         args,
-                        url,
+                        job.url,
                         output_template,
                         progress_reporter=reporter,
                         progress_label=label,
                     )
-                ] = label
+                ] = (job, label)
 
             for future in as_completed(futures):
-                label = futures[future]
+                job, label = futures[future]
                 try:
                     result = future.result()
                 except Exception as exc:
                     reporter.message(label, f"failed: {exc}")
-                    failures += 1
+                    result = 1
+
+                if result == 0:
+                    completed.add(job.index)
+                    reporter.message(label, "done")
                     reporter.complete_job(label)
                     continue
 
-                if result == 0:
-                    reporter.message(label, "done")
+                reporter.close_bar(label)
+                if attempt <= args.retries:
+                    failed_jobs.append(job)
+                    reporter.message(label, "will retry")
                 else:
-                    failures += 1
-                reporter.complete_job(label)
+                    reporter.message(label, "failed after retries")
+                    reporter.complete_job(label)
+
+            executor.shutdown(wait=True)
+            executor = None
+    except KeyboardInterrupt:
+        interrupted = True
+        reporter.message("batch", "interrupted; stopping after current cleanup")
+        if executor:
+            executor.shutdown(wait=False, cancel_futures=True)
     finally:
         reporter.close()
 
+    if interrupted:
+        print("Interrupted by user.", file=sys.stderr)
+        return 130
+
+    failures = len(urls) - len(completed)
     if failures:
-        print(f"Completed with {failures} failure(s).", file=sys.stderr)
+        print(
+            f"Completed with {failures} failure(s) after {args.retries} retry attempt(s).",
+            file=sys.stderr,
+        )
         return 1
-    reporter.message("batch", "all done")
+    if not args.quiet:
+        print("All downloads completed.")
     return 0
 
 
@@ -404,21 +462,25 @@ def main(argv: list[str] | None = None) -> int:
     output_template = args.output or default_output_template(args.output_dir)
     Path(output_template).parent.mkdir(parents=True, exist_ok=True)
 
-    if args.input_file:
-        return run_batch_mode(args, output_template)
-
-    if args.mode == "browser":
-        return run_browser_mode(args, output_template)
-
-    if args.mode == "ytdlp":
-        return run_ytdlp_mode(args, output_template)
-
     try:
-        return run_browser_mode(args, output_template)
-    except Exception as exc:
-        print(f"Browser sniff failed: {exc}", file=sys.stderr)
-        print("Falling back to yt-dlp page extraction.", file=sys.stderr)
-        return run_ytdlp_mode(args, output_template)
+        if args.input_file:
+            return run_batch_mode(args, output_template)
+
+        if args.mode == "browser":
+            return run_browser_mode(args, output_template)
+
+        if args.mode == "ytdlp":
+            return run_ytdlp_mode(args, output_template)
+
+        try:
+            return run_browser_mode(args, output_template)
+        except Exception as exc:
+            print(f"Browser sniff failed: {exc}", file=sys.stderr)
+            print("Falling back to yt-dlp page extraction.", file=sys.stderr)
+            return run_ytdlp_mode(args, output_template)
+    except KeyboardInterrupt:
+        print("Interrupted by user.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

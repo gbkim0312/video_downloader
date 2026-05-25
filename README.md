@@ -76,6 +76,14 @@ https://example.com/watch/789
 video-dl --input-file sites.txt --parallel 3
 ```
 
+실패한 URL만 재시도합니다. 기본값은 실패 후 3번 재시도이며, `--retries`로 조정할 수 있습니다.
+
+```bash
+video-dl --input-file sites.txt --parallel 3 --retries 5
+```
+
+`Ctrl+C`를 누르면 새 작업과 재시도를 중단하고 진행바를 정리한 뒤 종료합니다.
+
 배치 모드에서는 전체 작업 수와 각 다운로드의 진행바를 MB 단위로 출력합니다. 전체 파일 크기를 알 수 없는 스트림은 진행된 MB와 속도를 계속 갱신합니다.
 
 ```text
