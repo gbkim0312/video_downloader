@@ -71,7 +71,7 @@ class ProgressReporter:
             for bar in self._bars.values():
                 bar.close()
             self._bars.clear()
-            if self._overall:
+            if self._overall is not None:
                 self._overall.close()
                 self._overall = None
 
@@ -86,7 +86,7 @@ class ProgressReporter:
             return
         with self._lock:
             self.close_bar(label)
-            if self._overall:
+            if self._overall is not None:
                 self._overall.update(1)
 
     def close_bar(self, label: str) -> None:
@@ -94,7 +94,7 @@ class ProgressReporter:
             return
         with self._lock:
             bar = self._bars.pop(label, None)
-            if bar:
+            if bar is not None:
                 bar.close()
             self._last_downloaded.pop(label, None)
             self._last_updated.pop(label, None)
@@ -171,7 +171,7 @@ class ProgressReporter:
     def _finish_download(self, label: str, total: int | float | None) -> None:
         with self._lock:
             bar = self._bars.get(label)
-            if bar and total:
+            if bar is not None and total:
                 total_mb = bytes_to_mb(total)
                 bar.total = total_mb
                 if total_mb is not None and bar.n < total_mb:
