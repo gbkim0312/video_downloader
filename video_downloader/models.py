@@ -29,13 +29,13 @@ class StreamCandidate:
 
     @property
     def kind(self) -> str:
-        lower_url = self.url.lower()
+        lower_path = urlparse(self.url).path.lower().rstrip("/")
         lower_type = self.content_type.lower()
-        if ".m3u8" in lower_url or "mpegurl" in lower_type:
+        if lower_path.endswith(".m3u8") or "mpegurl" in lower_type:
             return "hls"
-        if ".mpd" in lower_url or "dash+xml" in lower_type:
+        if lower_path.endswith(".mpd") or "dash+xml" in lower_type:
             return "dash"
-        if any(ext in lower_url for ext in (".mp4", ".m4v", ".webm", ".mov")):
+        if any(lower_path.endswith(ext) for ext in (".mp4", ".m4v", ".webm", ".mov")):
             return "file"
         if lower_type.startswith("video/"):
             return "file"

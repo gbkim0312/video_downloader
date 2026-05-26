@@ -186,13 +186,13 @@ def print_candidates(candidates: list[StreamCandidate]) -> None:
         print(f"    {candidate.url}")
 
 
-def select_candidate(
+def select_candidates(
     candidates: list[StreamCandidate],
     *,
     include_ads: bool,
     allow_short: bool,
     candidate_index: int,
-) -> StreamCandidate | None:
+) -> list[StreamCandidate]:
     if include_ads:
         selectable = candidates
     else:
@@ -203,12 +203,12 @@ def select_candidate(
             or (allow_short and is_short_duration_only_ad(candidate))
         ]
     if not selectable:
-        return None
+        return []
     if candidate_index < 1 or candidate_index > len(selectable):
         raise SystemExit(
             f"--candidate must be between 1 and {len(selectable)} after filtering"
         )
-    return selectable[candidate_index - 1]
+    return selectable[candidate_index - 1 :]
 
 
 def run_browser_mode(args: argparse.Namespace, output_template: str) -> int:
@@ -273,13 +273,13 @@ def run_browser_download(
     if not candidates:
         raise NoStreamCandidatesError(url)
 
-    selected = select_candidate(
+    selected_candidates = select_candidates(
         candidates,
         include_ads=args.include_ads,
         allow_short=args.allow_short,
         candidate_index=args.candidate,
     )
-    if selected is None:
+    if not selected_candidates:
         message = (
             "No non-ad stream candidate found. "
             f"Try --include-ads or --headed. url={url}"
@@ -290,32 +290,56 @@ def run_browser_download(
             print(message, file=sys.stderr)
         return 2
 
-    if args.print_url:
-        if progress_reporter:
-            progress_reporter.message(progress_label, selected.url)
-        else:
-            print(selected.url)
+    last_error: Exception | None = None
+    total_selected = len(selected_candidates)
+    for attempt, selected in enumerate(selected_candidates, start=1):
+        candidate_number = args.candidate + attempt - 1
+        if args.print_url:
+            if progress_reporter:
+                progress_reporter.message(progress_label, selected.url)
+            else:
+                print(selected.url)
 
-    selected_output = output_template
-    if args.output_template is None and selected.page_title:
-        selected_output = default_output_template(args.output_dir, selected.page_title)
-        Path(selected_output).parent.mkdir(parents=True, exist_ok=True)
-        if progress_reporter:
-            progress_reporter.message(
-                progress_label,
-                f"Using page title for filename: {selected.page_title}",
+        selected_output = output_template
+        if args.output_template is None and selected.page_title:
+            selected_output = default_output_template(
+                args.output_dir,
+                selected.page_title,
             )
-        elif not args.quiet:
-            print(f"Using page title for filename: {selected.page_title}")
+            Path(selected_output).parent.mkdir(parents=True, exist_ok=True)
+            if progress_reporter:
+                progress_reporter.message(
+                    progress_label,
+                    f"Using page title for filename: {selected.page_title}",
+                )
+            elif not args.quiet:
+                print(f"Using page title for filename: {selected.page_title}")
 
-    download_candidate(
-        selected,
-        output_template=selected_output,
-        quiet=args.quiet or progress_reporter is not None,
-        progress_hook=progress_reporter.hook if progress_reporter else None,
-        progress_label=progress_label,
-    )
-    return 0
+        try:
+            download_candidate(
+                selected,
+                output_template=selected_output,
+                quiet=args.quiet or progress_reporter is not None,
+                progress_hook=progress_reporter.hook if progress_reporter else None,
+                progress_label=progress_label,
+            )
+            return 0
+        except Exception as exc:
+            last_error = exc
+            if attempt >= total_selected:
+                continue
+            message = (
+                f"candidate {candidate_number} failed; "
+                f"trying next candidate: {exc}"
+            )
+            if progress_reporter:
+                progress_reporter.message(progress_label, message)
+            elif not args.quiet:
+                print(message, file=sys.stderr)
+
+    if last_error is not None:
+        raise last_error
+    return 1
 
 
 def run_ytdlp_mode(args: argparse.Namespace, output_template: str) -> int:

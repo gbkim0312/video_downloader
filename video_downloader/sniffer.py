@@ -5,6 +5,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
+from urllib.parse import urlparse
 
 from playwright.async_api import Browser, BrowserContext, Page, Response, async_playwright
 
@@ -13,19 +14,25 @@ from .models import StreamCandidate
 from .scoring import content_score
 
 
-VIDEO_EXTENSIONS = (".m3u8", ".mpd", ".mp4", ".m4v", ".webm", ".mov")
+STREAM_EXTENSIONS = (".m3u8", ".mpd", ".mp4", ".m4v", ".webm", ".mov")
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
 VIDEO_CONTENT_TYPES = (
     "application/vnd.apple.mpegurl",
     "application/x-mpegurl",
     "application/dash+xml",
     "video/",
 )
+IMAGE_CONTENT_TYPES = ("image/",)
 
 
 def looks_like_stream(url: str, content_type: str = "") -> bool:
-    lower_url = url.lower()
+    path = urlparse(url).path.lower().rstrip("/")
     lower_type = content_type.lower()
-    return any(ext in lower_url for ext in VIDEO_EXTENSIONS) or any(
+    if any(path.endswith(ext) for ext in IMAGE_EXTENSIONS) or any(
+        marker in lower_type for marker in IMAGE_CONTENT_TYPES
+    ):
+        return False
+    return any(path.endswith(ext) for ext in STREAM_EXTENSIONS) or any(
         marker in lower_type for marker in VIDEO_CONTENT_TYPES
     )
 
@@ -188,6 +195,8 @@ class BrowserStreamSniffer:
             return
 
         request = response.request
+        if request.resource_type == "image":
+            return
         request_headers = await request.all_headers()
         candidate = StreamCandidate(
             url=response.url,

@@ -59,7 +59,9 @@ video-dl "https://example.com/watch/123" --allow-short
 video-dl "https://example.com/watch/123" -m ytdlp
 ```
 
-기본 `auto` 모드는 브라우저 감지에서 스트림 후보를 하나도 찾지 못한 경우에만 `yt-dlp` 페이지 추출로 fallback합니다. 후보를 찾은 뒤 다운로드가 실패한 경우에는 fallback하지 않고 실패로 처리해 배치 재시도 대상에 넣습니다. fallback을 완전히 끄려면:
+브라우저 감지 모드는 점수가 높은 후보부터 다운로드를 시도합니다. 선택한 후보가 404 등으로 실패하면 필터링된 다음 후보를 이어서 시도하고, 모든 후보가 실패한 경우에만 실패로 처리합니다.
+
+기본 `auto` 모드는 브라우저 감지에서 스트림 후보를 하나도 찾지 못한 경우 `yt-dlp` 페이지 추출로 fallback합니다. 이 fallback을 완전히 끄려면:
 
 ```bash
 video-dl "https://example.com/watch/123" --no-fallback
