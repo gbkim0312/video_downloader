@@ -407,12 +407,18 @@ def run_link_extraction(args: argparse.Namespace) -> int:
     if args.links_output:
         output = Path(args.links_output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            "\n".join(candidate.url for candidate in links) + ("\n" if links else ""),
-            encoding="utf-8",
+        needs_leading_newline = (
+            output.exists()
+            and output.stat().st_size > 0
+            and not output.read_bytes().endswith(b"\n")
         )
+        with output.open("a", encoding="utf-8") as file:
+            if needs_leading_newline and links:
+                file.write("\n")
+            for candidate in links:
+                file.write(f"{candidate.url}\n")
         if not args.quiet:
-            print(f"Wrote {len(links)} link(s) to {output}")
+            print(f"Appended {len(links)} link(s) to {output}")
     else:
         for candidate in links:
             print(candidate.url)
