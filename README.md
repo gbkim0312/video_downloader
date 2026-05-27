@@ -102,6 +102,12 @@ https://example.com/watch/789
 video-dl -i sites.txt -j 3
 ```
 
+`htop`처럼 터미널 전체 화면에서 고정된 표 형태로 진행률을 보려면:
+
+```bash
+video-dl -i sites.txt -j 10 --dashboard
+```
+
 HLS/DASH 스트림은 내부적으로 작은 조각(fragment) 여러 개로 나뉩니다. `-F`, `--fragment-parallel`은 한 영상 안에서 이 조각을 몇 개씩 동시에 받을지 정합니다. 기본값은 4입니다.
 
 ```bash
@@ -121,13 +127,11 @@ video-dl -i sites.txt -j 3 -r 5
 마지막 요약에는 실제 다운로드한 개수, 이미 있어서 스킵한 개수, 실패한 개수를 함께 출력합니다.
 
 배치 모드에서는 전체 작업 수와 각 다운로드의 진행바를 MB 단위로 출력합니다. 전체 파일 크기를 알 수 없는 스트림은 진행된 MB와 속도를 계속 갱신합니다.
-배치 중 상태 메시지는 별도 로그 줄을 계속 추가하지 않고 각 작업 진행바 안에서 갱신됩니다.
+다운로드 중에는 진행바만 갱신하고, 재시도/실패 같은 로그는 진행바가 정리된 뒤 마지막에 모아서 출력합니다.
 
 ```text
-[1/3] Opening page with headless Chromium; sniffing streams for 25s...
 batch:  33%|████████████████                  | 1/3 [00:35<01:10, 35.1s/file]
-2/3:    42%|███████████████                   | 84.0/200.0 MB [3.1 MB/s]
-[2/3] done
+1/3 try 1         : ███████████████            |  42% 84.0/200.0 MB 3.1 MB/s
 ```
 
 재생목록/목록 페이지에서 영상 페이지 링크만 추출:
@@ -154,6 +158,7 @@ video-dl -i sites.txt -j 3
 | `-j`, `--parallel` | 배치 다운로드 동시 실행 수 |
 | `-F`, `--fragment-parallel` | HLS/DASH 조각 동시 다운로드 수 |
 | `-r`, `--retries` | 실패 URL 재시도 횟수 |
+| `--dashboard` | 배치 진행률을 전체 화면 표 형태로 표시 |
 | `-l`, `--list-only` | 스트림 후보만 출력 |
 | `-c`, `--candidate` | 다운로드할 후보 번호 |
 | `-m`, `--mode` | `auto`, `browser`, `ytdlp` 중 선택 |

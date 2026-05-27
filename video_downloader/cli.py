@@ -13,6 +13,7 @@ from .adapters.downloader.ytdlp import (
     default_output_template,
 )
 from .adapters.progress.tqdm_progress import ProgressReporter
+from .adapters.progress.rich_dashboard import DashboardProgressReporter
 from .adapters.storage.text_url_store import TextUrlListStore
 from .application.downloads import (
     BatchDownloadService,
@@ -134,6 +135,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the selected stream URL before downloading.",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output.")
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Use a full-screen terminal dashboard for batch progress.",
+    )
     parser.add_argument(
         "-x",
         "--extract-links",
@@ -280,10 +286,11 @@ def run_link_extraction(args: argparse.Namespace) -> int:
 
 
 def run_batch(args: argparse.Namespace, output_template: str) -> int:
+    progress_factory = DashboardProgressReporter if args.dashboard else ProgressReporter
     service = BatchDownloadService(
         download_service=make_download_service(),
         url_store=TextUrlListStore(),
-        progress_factory=ProgressReporter,
+        progress_factory=progress_factory,
     )
     try:
         exit_code, summary = service.run(
