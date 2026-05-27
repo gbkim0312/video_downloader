@@ -334,14 +334,6 @@ class BatchDownloadService:
             total_jobs=len(urls),
             worker_slots=batch_options.parallel,
         )
-        reporter.message(
-            "batch",
-            (
-                f"starting {len(urls)} URL(s) with parallel={batch_options.parallel}, "
-                f"retries={batch_options.retries}"
-            ),
-        )
-
         jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
         failed_jobs = jobs
         completed: dict[int, str] = {}
