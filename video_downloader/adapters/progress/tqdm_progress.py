@@ -7,6 +7,7 @@ from typing import Any
 
 
 BYTES_PER_MB = 1024 * 1024
+LABEL_WIDTH = 18
 
 
 def bytes_to_mb(value: int | float | None) -> float | None:
@@ -44,6 +45,7 @@ class ProgressReporter:
         self._bars: dict[str, Any] = {}
         self._last_downloaded: dict[str, int] = {}
         self._positions: dict[str, int] = {}
+        self._deferred_messages: list[str] = []
         self._free_positions = list(range(1, worker_slots + 1))
         self._next_position = worker_slots + 1
         self._overall = None
@@ -82,17 +84,15 @@ class ProgressReporter:
             if self._overall is not None:
                 self._overall.close()
                 self._overall = None
+            self._flush_messages()
 
     def message(self, label: str, text: str) -> None:
         if not self.enabled:
             return
         with self._lock:
-            if label == "batch":
-                if self._overall is not None:
-                    self._overall.set_postfix_str(text, refresh=True)
-                return
-            bar = self._status_bar_for(label)
-            bar.set_description_str(f"{label}: {self._compact(text)}", refresh=True)
+            message = self._deferred_message(label, text)
+            if message:
+                self._deferred_messages.append(message)
 
     def _set_postfix(self, bar: Any, text: str, *, refresh: bool = False) -> None:
         bar.postfix = text
@@ -151,22 +151,29 @@ class ProgressReporter:
             return cleaned
         return cleaned[: limit - 3] + "..."
 
-    def _status_bar_for(self, label: str) -> Any:
-        bar = self._bars.get(label)
-        if bar is not None:
-            return bar
+    def _format_label(self, label: str) -> str:
+        return f"{label:<{LABEL_WIDTH}}"[:LABEL_WIDTH]
 
-        bar = self._load_tqdm()(
-            total=1,
-            desc=label,
-            position=self._position_for(label),
-            leave=False,
-            dynamic_ncols=True,
-            file=sys.stdout,
-            bar_format="{desc}",
+    def _deferred_message(self, label: str, text: str) -> str | None:
+        compact = self._compact(text, limit=180)
+        if not compact or compact in {"done", "downloaded", "skipped"}:
+            return None
+        quiet_prefixes = (
+            "Opening page with ",
+            "Found ",
+            "Using page title for filename:",
         )
-        self._bars[label] = bar
-        return bar
+        if compact.startswith(quiet_prefixes):
+            return None
+        return f"{label}: {compact}"
+
+    def _flush_messages(self) -> None:
+        if not self._deferred_messages:
+            return
+        print("Logs:", file=sys.stderr)
+        for message in self._deferred_messages:
+            print(message, file=sys.stderr)
+        self._deferred_messages.clear()
 
     def _bar_for(self, label: str, status: dict[str, Any]) -> Any:
         total_bytes = status.get("total_bytes") or status.get("total_bytes_estimate")
@@ -175,7 +182,7 @@ class ProgressReporter:
             total_mb = bytes_to_mb(total_bytes)
             bar = self._load_tqdm()(
                 total=total_mb,
-                desc=label,
+                desc=self._format_label(label),
                 unit="MB",
                 position=self._position_for(label),
                 leave=False,
@@ -183,14 +190,14 @@ class ProgressReporter:
                 file=sys.stdout,
                 bar_format="{desc}: {bar}| {percentage:3.0f}%{postfix}",
             )
-            self._set_postfix(bar, "starting")
+            self._set_postfix(bar, "")
             if total_mb is None:
                 bar.bar_format = "{desc}: {bar}|{postfix}"
             self._bars[label] = bar
             return bar
 
         bar.unit = "MB"
-        bar.set_description_str(label, refresh=False)
+        bar.set_description_str(self._format_label(label), refresh=False)
         bar.bar_format = "{desc}: {bar}| {percentage:3.0f}%{postfix}"
         if total_bytes and bar.total is None:
             bar.total = bytes_to_mb(total_bytes)
