@@ -102,6 +102,14 @@ https://example.com/watch/789
 video-dl -i sites.txt -j 3
 ```
 
+HLS/DASH 스트림은 내부적으로 작은 조각(fragment) 여러 개로 나뉩니다. `-F`, `--fragment-parallel`은 한 영상 안에서 이 조각을 몇 개씩 동시에 받을지 정합니다. 기본값은 4입니다.
+
+```bash
+video-dl -i sites.txt -j 3 -F 8
+```
+
+`-j`는 동시에 처리할 URL 개수이고, `-F`는 각 다운로드 내부의 조각 동시 다운로드 수입니다. 너무 크게 잡으면 사이트가 차단하거나 서버/네트워크가 불안정해질 수 있으니 보통 4~8부터 시도하는 편이 좋습니다.
+
 실패한 URL만 재시도합니다. 기본값은 실패 후 3번 재시도이며, `--retries`로 조정할 수 있습니다.
 
 ```bash
@@ -142,6 +150,7 @@ video-dl -i sites.txt -j 3
 | `-o`, `--output-dir` | 다운로드 저장 디렉토리 |
 | `-i`, `--input-file` | 한 줄에 하나씩 URL이 있는 파일 |
 | `-j`, `--parallel` | 배치 다운로드 동시 실행 수 |
+| `-F`, `--fragment-parallel` | HLS/DASH 조각 동시 다운로드 수 |
 | `-r`, `--retries` | 실패 URL 재시도 횟수 |
 | `-l`, `--list-only` | 스트림 후보만 출력 |
 | `-c`, `--candidate` | 다운로드할 후보 번호 |

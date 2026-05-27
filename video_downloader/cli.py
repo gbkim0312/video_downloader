@@ -47,6 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of URLs to process at the same time when using --input-file.",
     )
     parser.add_argument(
+        "-F",
+        "--fragment-parallel",
+        type=int,
+        default=4,
+        help="Concurrent media fragments per download for HLS/DASH. Default: 4.",
+    )
+    parser.add_argument(
         "-r",
         "--retries",
         type=int,
@@ -322,6 +329,7 @@ def run_browser_download(
                 quiet=args.quiet or progress_reporter is not None,
                 progress_hook=progress_reporter.hook if progress_reporter else None,
                 progress_label=progress_label,
+                fragment_parallel=args.fragment_parallel,
             )
             return 0
         except Exception as exc:
@@ -366,6 +374,7 @@ def run_ytdlp_download(
         quiet=args.quiet or progress_reporter is not None,
         progress_hook=progress_reporter.hook if progress_reporter else None,
         progress_label=progress_label,
+        fragment_parallel=args.fragment_parallel,
     )
     return 0
 
@@ -515,6 +524,9 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
         return 2
     if args.parallel < 1:
         print("--parallel must be at least 1.", file=sys.stderr)
+        return 2
+    if args.fragment_parallel < 1:
+        print("--fragment-parallel must be at least 1.", file=sys.stderr)
         return 2
     if args.retries < 0:
         print("--retries must be at least 0.", file=sys.stderr)

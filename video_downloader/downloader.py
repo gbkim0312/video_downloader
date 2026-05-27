@@ -32,6 +32,7 @@ def download_url(
     quiet: bool = False,
     progress_hook: ProgressHook | None = None,
     progress_label: str = "",
+    fragment_parallel: int = 4,
 ) -> None:
     try:
         from yt_dlp import YoutubeDL
@@ -49,7 +50,7 @@ def download_url(
         "no_warnings": quiet,
         "retries": 8,
         "fragment_retries": 8,
-        "concurrent_fragment_downloads": 4,
+        "concurrent_fragment_downloads": fragment_parallel,
     }
     if progress_hook:
         options["progress_hooks"] = [
@@ -69,6 +70,7 @@ def download_candidate(
     quiet: bool = False,
     progress_hook: ProgressHook | None = None,
     progress_label: str = "",
+    fragment_parallel: int = 4,
 ) -> None:
     headers = {}
     if candidate.user_agent:
@@ -82,4 +84,5 @@ def download_candidate(
         quiet=quiet,
         progress_hook=progress_hook,
         progress_label=progress_label,
+        fragment_parallel=fragment_parallel,
     )
