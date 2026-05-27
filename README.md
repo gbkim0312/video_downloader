@@ -165,6 +165,16 @@ video-dl -i sites.txt -j 3
 | `--allow-popups` | 새 탭/팝업 자동 차단 끄기 |
 | `--output-template` | `yt-dlp` 출력 파일명 템플릿 직접 지정 |
 
+## 구조
+
+코드는 헥사고날 구조로 나뉩니다.
+
+- `video_downloader/domain`: `StreamCandidate`, `LinkCandidate` 같은 모델과 광고/후보 점수화 규칙
+- `video_downloader/ports`: 브라우저 감지, 다운로드, 진행 표시, URL 저장소 포트
+- `video_downloader/application`: 단일 다운로드, 배치 다운로드, 링크 추출 유스케이스
+- `video_downloader/adapters`: Playwright, yt-dlp, tqdm, 텍스트 파일 저장소 구현
+- 기존 `sniffer.py`, `downloader.py`, `progress.py` 같은 모듈은 호환용 wrapper로 유지
+
 ## 광고 스트림 구분 방식
 
 광고 판별은 완벽한 보장이 아니라 휴리스틱입니다. 다음 신호를 조합합니다.

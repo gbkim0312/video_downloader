@@ -2,50 +2,30 @@ from __future__ import annotations
 
 import argparse
 import sys
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
 
-from .downloader import (
+from .adapters.browser.link_extractor import PlaywrightLinkExtractor
+from .adapters.browser.stream_sniffer import PlaywrightStreamSniffer
+from .adapters.downloader.ytdlp import (
     DOWNLOAD_DOWNLOADED,
     DOWNLOAD_SKIPPED,
+    YtDlpDownloader,
     default_output_template,
-    download_candidate,
-    download_url,
 )
-from .models import StreamCandidate
-from .progress import ProgressReporter
-from .scoring import ad_score, content_score, is_likely_ad, is_short_duration_only_ad
+from .adapters.progress.tqdm_progress import ProgressReporter
+from .adapters.storage.text_url_store import TextUrlListStore
+from .application.downloads import (
+    BatchDownloadService,
+    BatchOptions,
+    DownloadOptions,
+    DownloadService,
+)
+from .application.links import LinkExtractionOptions, LinkExtractionService
+from .domain.models import BatchSummary, StreamCandidate
+from .domain.scoring import ad_score, content_score, is_likely_ad
 
 
-@dataclass(frozen=True, slots=True)
-class BatchJob:
-    index: int
-    url: str
-
-
-RESULT_DOWNLOADED = "downloaded"
-RESULT_SKIPPED = "skipped"
-RESULT_FAILED = "failed"
-SUCCESS_RESULTS = {
-    0,
-    RESULT_DOWNLOADED,
-    RESULT_SKIPPED,
-    DOWNLOAD_DOWNLOADED,
-    DOWNLOAD_SKIPPED,
-}
-
-
-class NoStreamCandidatesError(RuntimeError):
-    def __init__(self, url: str) -> None:
-        super().__init__(f"no stream candidates found for {url}")
-        self.url = url
-
-
-def result_to_exit_code(result: int | str) -> int:
-    if isinstance(result, int):
-        return result
-    return 0 if result in SUCCESS_RESULTS else 1
+SUCCESS_RESULTS = {0, DOWNLOAD_DOWNLOADED, DOWNLOAD_SKIPPED}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -124,11 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow new tabs/popups. By default they are closed and known ad requests are blocked.",
     )
-    parser.add_argument(
-        "--user-agent",
-        default=None,
-        help="Override browser user agent.",
-    )
+    parser.add_argument("--user-agent", default=None, help="Override browser user agent.")
     parser.add_argument(
         "--include-ads",
         action="store_true",
@@ -157,12 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the selected stream URL before downloading.",
     )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Reduce yt-dlp output.",
-    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output.")
     parser.add_argument(
         "-x",
         "--extract-links",
@@ -187,6 +158,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to wait after opening a link extraction page.",
     )
     return parser
+
+
+def make_download_options(args: argparse.Namespace) -> DownloadOptions:
+    return DownloadOptions(
+        mode=args.mode,
+        no_fallback=args.no_fallback,
+        headless=not args.headed,
+        user_agent=args.user_agent,
+        play_seconds=args.play_seconds,
+        allow_popups=args.allow_popups,
+        include_ads=args.include_ads,
+        allow_short=args.allow_short,
+        candidate_index=args.candidate,
+        list_only=args.list_only,
+        print_url=args.print_url,
+        quiet=args.quiet,
+        output_dir=args.output_dir,
+        output_template=args.output_template,
+        fragment_parallel=args.fragment_parallel,
+    )
+
+
+def make_download_service() -> DownloadService:
+    return DownloadService(
+        sniffer=PlaywrightStreamSniffer(),
+        downloader=YtDlpDownloader(),
+    )
+
+
+def make_link_service() -> LinkExtractionService:
+    return LinkExtractionService(
+        extractor=PlaywrightLinkExtractor(),
+        url_store=TextUrlListStore(),
+    )
+
+
+def result_to_exit_code(result: int | str) -> int:
+    if isinstance(result, int):
+        return result
+    return 0 if result in SUCCESS_RESULTS else 1
 
 
 def format_duration(seconds: float | None) -> str:
@@ -217,263 +228,48 @@ def print_candidates(candidates: list[StreamCandidate]) -> None:
         print(f"    {candidate.url}")
 
 
-def select_candidates(
-    candidates: list[StreamCandidate],
-    *,
-    include_ads: bool,
-    allow_short: bool,
-    candidate_index: int,
-) -> list[StreamCandidate]:
-    if include_ads:
-        selectable = candidates
-    else:
-        selectable = [
-            candidate
-            for candidate in candidates
-            if not is_likely_ad(candidate)
-            or (allow_short and is_short_duration_only_ad(candidate))
-        ]
-    if not selectable:
-        return []
-    if candidate_index < 1 or candidate_index > len(selectable):
-        raise SystemExit(
-            f"--candidate must be between 1 and {len(selectable)} after filtering"
-        )
-    return selectable[candidate_index - 1 :]
-
-
-def run_browser_mode(args: argparse.Namespace, output_template: str) -> int | str:
-    return run_browser_download(
-        args,
-        args.url,
-        output_template,
-        progress_reporter=None,
-        progress_label="single",
-        show_candidates=True,
+def print_batch_summary(summary: BatchSummary, retries: int) -> None:
+    print(
+        (
+            "Summary: "
+            f"downloaded={summary.downloaded}, "
+            f"skipped={summary.skipped}, "
+            f"failed={summary.failed}, "
+            f"total={summary.total}"
+        ),
+        file=sys.stderr if summary.failed else sys.stdout,
     )
-
-
-def run_browser_download(
-    args: argparse.Namespace,
-    url: str,
-    output_template: str,
-    *,
-    progress_reporter: ProgressReporter | None,
-    progress_label: str,
-    show_candidates: bool,
-) -> int | str:
-    try:
-        from .sniffer import sniff_streams
-    except ModuleNotFoundError as exc:
-        missing = exc.name or "playwright"
-        raise RuntimeError(
-            f"Missing dependency: {missing}. Install with `pip install -e .` "
-            "and run `python -m playwright install chromium`."
-        ) from exc
-
-    if not args.quiet:
-        browser_mode = "headed Chromium" if args.headed else "headless Chromium"
-        message = (
-            f"Opening page with {browser_mode}; sniffing streams for "
-            f"{args.play_seconds:g}s..."
+    if summary.failed:
+        print(
+            f"Completed with {summary.failed} failure(s) after {retries} retry attempt(s).",
+            file=sys.stderr,
         )
-        if progress_reporter:
-            progress_reporter.message(progress_label, message)
-        else:
-            print(message)
-
-    candidates = sniff_streams(
-        url,
-        headless=not args.headed,
-        user_agent=args.user_agent,
-        play_seconds=args.play_seconds,
-        allow_popups=args.allow_popups,
-    )
-
-    if not args.quiet:
-        message = f"Found {len(candidates)} stream candidate(s)."
-        if progress_reporter:
-            progress_reporter.message(progress_label, message)
-        else:
-            print(message)
-
-    if show_candidates:
-        print_candidates(candidates)
-    if args.list_only:
-        return 0
-    if not candidates:
-        raise NoStreamCandidatesError(url)
-
-    selected_candidates = select_candidates(
-        candidates,
-        include_ads=args.include_ads,
-        allow_short=args.allow_short,
-        candidate_index=args.candidate,
-    )
-    if not selected_candidates:
-        message = (
-            "No non-ad stream candidate found. "
-            f"Try --include-ads or --headed. url={url}"
-        )
-        if progress_reporter:
-            progress_reporter.message(progress_label, message)
-        else:
-            print(message, file=sys.stderr)
-        return 2
-
-    last_error: Exception | None = None
-    total_selected = len(selected_candidates)
-    for attempt, selected in enumerate(selected_candidates, start=1):
-        candidate_number = args.candidate + attempt - 1
-        if args.print_url:
-            if progress_reporter:
-                progress_reporter.message(progress_label, selected.url)
-            else:
-                print(selected.url)
-
-        selected_output = output_template
-        if args.output_template is None and selected.page_title:
-            selected_output = default_output_template(
-                args.output_dir,
-                selected.page_title,
-            )
-            Path(selected_output).parent.mkdir(parents=True, exist_ok=True)
-            if progress_reporter:
-                progress_reporter.message(
-                    progress_label,
-                    f"Using page title for filename: {selected.page_title}",
-                )
-            elif not args.quiet:
-                print(f"Using page title for filename: {selected.page_title}")
-
-        try:
-            return download_candidate(
-                selected,
-                output_template=selected_output,
-                quiet=args.quiet or progress_reporter is not None,
-                progress_hook=progress_reporter.hook if progress_reporter else None,
-                progress_label=progress_label,
-                fragment_parallel=args.fragment_parallel,
-            )
-        except Exception as exc:
-            last_error = exc
-            if attempt >= total_selected:
-                continue
-            message = (
-                f"candidate {candidate_number} failed; "
-                f"trying next candidate: {exc}"
-            )
-            if progress_reporter:
-                progress_reporter.message(progress_label, message)
-            elif not args.quiet:
-                print(message, file=sys.stderr)
-
-    if last_error is not None:
-        raise last_error
-    return RESULT_FAILED
-
-
-def run_ytdlp_mode(args: argparse.Namespace, output_template: str) -> str:
-    return run_ytdlp_download(
-        args,
-        args.url,
-        output_template,
-        progress_reporter=None,
-        progress_label="single",
-    )
-
-
-def run_ytdlp_download(
-    args: argparse.Namespace,
-    url: str,
-    output_template: str,
-    *,
-    progress_reporter: ProgressReporter | None,
-    progress_label: str,
-) -> int | str:
-    return download_url(
-        url,
-        output_template=output_template,
-        quiet=args.quiet or progress_reporter is not None,
-        progress_hook=progress_reporter.hook if progress_reporter else None,
-        progress_label=progress_label,
-        fragment_parallel=args.fragment_parallel,
-    )
-
-
-def run_auto_download(
-    args: argparse.Namespace,
-    url: str,
-    output_template: str,
-    *,
-    progress_reporter: ProgressReporter | None,
-    progress_label: str,
-    show_candidates: bool,
-) -> int | str:
-    try:
-        return run_browser_download(
-            args,
-            url,
-            output_template,
-            progress_reporter=progress_reporter,
-            progress_label=progress_label,
-            show_candidates=show_candidates,
-        )
-    except NoStreamCandidatesError:
-        if args.no_fallback:
-            raise
-        message = "no browser streams found; falling back to yt-dlp"
-        if progress_reporter:
-            progress_reporter.message(progress_label, f"{message} url={url}")
-        else:
-            print(f"{message}: {url}", file=sys.stderr)
-        return run_ytdlp_download(
-            args,
-            url,
-            output_template,
-            progress_reporter=progress_reporter,
-            progress_label=progress_label,
-        )
+        print("Failed URLs:", file=sys.stderr)
+        for job in summary.failed_jobs:
+            print(f"{job.index}: {job.url}", file=sys.stderr)
 
 
 def run_link_extraction(args: argparse.Namespace) -> int:
-    try:
-        from .link_extractor import extract_video_links
-    except ModuleNotFoundError as exc:
-        missing = exc.name or "playwright"
-        raise RuntimeError(
-            f"Missing dependency: {missing}. Install with `pip install -e .` "
-            "and run `python -m playwright install chromium`."
-        ) from exc
-
+    service = make_link_service()
     if not args.quiet:
         browser_mode = "headed Chromium" if args.headed else "headless Chromium"
         print(f"Opening page with {browser_mode}; extracting video links...")
 
-    links = extract_video_links(
+    links = service.extract(
         args.url,
-        headless=not args.headed,
-        user_agent=args.user_agent,
-        min_score=args.link_min_score,
-        wait_seconds=args.link_wait_seconds,
-        allow_popups=args.allow_popups,
+        options=LinkExtractionOptions(
+            headless=not args.headed,
+            user_agent=args.user_agent,
+            min_score=args.link_min_score,
+            wait_seconds=args.link_wait_seconds,
+            allow_popups=args.allow_popups,
+            quiet=args.quiet,
+        ),
     )
-
     if args.links_output:
-        output = Path(args.links_output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        needs_leading_newline = (
-            output.exists()
-            and output.stat().st_size > 0
-            and not output.read_bytes().endswith(b"\n")
-        )
-        with output.open("a", encoding="utf-8") as file:
-            if needs_leading_newline and links:
-                file.write("\n")
-            for candidate in links:
-                file.write(f"{candidate.url}\n")
+        service.append_links(args.links_output, links)
         if not args.quiet:
-            print(f"Appended {len(links)} link(s) to {output}")
+            print(f"Appended {len(links)} link(s) to {args.links_output}")
     else:
         for candidate in links:
             print(candidate.url)
@@ -483,197 +279,43 @@ def run_link_extraction(args: argparse.Namespace) -> int:
     return 0
 
 
-def read_urls(path: str | Path) -> list[str]:
-    urls: list[str] = []
-    with Path(path).open("r", encoding="utf-8") as file:
-        for line in file:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            urls.append(stripped)
-    return urls
-
-
-def process_one_url(
-    args: argparse.Namespace,
-    url: str,
-    output_template: str,
-    *,
-    progress_reporter: ProgressReporter,
-    progress_label: str,
-) -> int | str:
+def run_batch(args: argparse.Namespace, output_template: str) -> int:
+    service = BatchDownloadService(
+        download_service=make_download_service(),
+        url_store=TextUrlListStore(),
+        progress_factory=ProgressReporter,
+    )
     try:
-        if args.mode == "browser":
-            return run_browser_download(
-                args,
-                url,
-                output_template,
-                progress_reporter=progress_reporter,
-                progress_label=progress_label,
-                show_candidates=args.list_only,
-            )
-
-        if args.mode == "ytdlp":
-            return run_ytdlp_download(
-                args,
-                url,
-                output_template,
-                progress_reporter=progress_reporter,
-                progress_label=progress_label,
-            )
-
-        return run_auto_download(
-            args,
-            url,
+        exit_code, summary = service.run(
+            args.input_file,
             output_template,
-            progress_reporter=progress_reporter,
-            progress_label=progress_label,
-            show_candidates=args.list_only,
+            download_options=make_download_options(args),
+            batch_options=BatchOptions(parallel=args.parallel, retries=args.retries),
         )
-    except Exception as exc:
-        progress_reporter.message(progress_label, f"failed: {exc} url={url}")
-        return RESULT_FAILED
-
-
-def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
-    try:
-        urls = read_urls(args.input_file)
-    except OSError as exc:
-        print(f"Could not read {args.input_file}: {exc}", file=sys.stderr)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         return 2
-    if not urls:
-        print(f"No URLs found in {args.input_file}.", file=sys.stderr)
-        return 2
-    if args.parallel < 1:
-        print("--parallel must be at least 1.", file=sys.stderr)
-        return 2
-    if args.fragment_parallel < 1:
-        print("--fragment-parallel must be at least 1.", file=sys.stderr)
-        return 2
-    if args.retries < 0:
-        print("--retries must be at least 0.", file=sys.stderr)
-        return 2
-    if args.headed and args.parallel > 1:
-        print("--headed with --parallel > 1 opens multiple visible browsers.", file=sys.stderr)
 
-    reporter = ProgressReporter(
-        enabled=not args.quiet,
-        total_jobs=len(urls),
-        worker_slots=args.parallel,
-    )
-    reporter.message(
-        "batch",
-        (
-            f"starting {len(urls)} URL(s) with parallel={args.parallel}, "
-            f"retries={args.retries}"
-        ),
-    )
-
-    jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
-    failed_jobs = jobs
-    completed: dict[int, str] = {}
-    interrupted = False
-    executor: ThreadPoolExecutor | None = None
-    try:
-        for attempt in range(1, args.retries + 2):
-            if not failed_jobs:
-                break
-
-            current_jobs = failed_jobs
-            failed_jobs = []
-            if attempt > 1:
-                reporter.message(
-                    "batch",
-                    f"retry {attempt - 1}/{args.retries}: {len(current_jobs)} failed URL(s)",
-                )
-
-            executor = ThreadPoolExecutor(max_workers=args.parallel)
-            futures: dict[Future[int | str], tuple[BatchJob, str]] = {}
-            for job in current_jobs:
-                label = f"{job.index}/{len(urls)} try {attempt}"
-                futures[
-                    executor.submit(
-                        process_one_url,
-                        args,
-                        job.url,
-                        output_template,
-                        progress_reporter=reporter,
-                        progress_label=label,
-                    )
-                ] = (job, label)
-
-            for future in as_completed(futures):
-                job, label = futures[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    reporter.message(label, f"failed: {exc} url={job.url}")
-                    result = 1
-
-                if result in SUCCESS_RESULTS:
-                    completed[job.index] = result
-                    if result == DOWNLOAD_SKIPPED:
-                        status = "skipped"
-                    elif result == 0:
-                        status = "done"
-                    else:
-                        status = "downloaded"
-                    reporter.message(label, status)
-                    reporter.complete_job(label)
-                    continue
-
-                reporter.close_bar(label)
-                if attempt <= args.retries:
-                    failed_jobs.append(job)
-                    reporter.message(label, f"will retry url={job.url}")
-                else:
-                    reporter.message(label, f"failed after retries url={job.url}")
-                    reporter.complete_job(label)
-
-            executor.shutdown(wait=True)
-            executor = None
-    except KeyboardInterrupt:
-        interrupted = True
-        reporter.message("batch", "interrupted; stopping after current cleanup")
-        if executor:
-            executor.shutdown(wait=False, cancel_futures=True)
-    finally:
-        reporter.close()
-
-    if interrupted:
+    print_batch_summary(summary, args.retries)
+    if exit_code == 130:
         print("Interrupted by user.", file=sys.stderr)
-        return 130
-
-    failures = len(urls) - len(completed)
-    downloaded_count = sum(
-        1 for result in completed.values() if result == DOWNLOAD_DOWNLOADED
-    )
-    skipped_count = sum(
-        1 for result in completed.values() if result == DOWNLOAD_SKIPPED
-    )
-    print(
-        (
-            "Summary: "
-            f"downloaded={downloaded_count}, "
-            f"skipped={skipped_count}, "
-            f"failed={failures}, "
-            f"total={len(urls)}"
-        ),
-        file=sys.stderr if failures else sys.stdout,
-    )
-    if failures:
-        failed_final = [job for job in jobs if job.index not in completed]
-        print(
-            f"Completed with {failures} failure(s) after {args.retries} retry attempt(s).",
-            file=sys.stderr,
-        )
-        print("Failed URLs:", file=sys.stderr)
-        for job in failed_final:
-            print(f"{job.index}: {job.url}", file=sys.stderr)
-        return 1
-    if not args.quiet:
+    elif not summary.failed and not args.quiet:
         print("All downloads completed.")
-    return 0
+    return exit_code
+
+
+def run_single(args: argparse.Namespace, output_template: str) -> int:
+    result, candidates = make_download_service().download(
+        args.url,
+        output_template,
+        options=make_download_options(args),
+        progress_reporter=None,
+        progress_label="single",
+        show_candidates=True,
+    )
+    if candidates:
+        print_candidates(candidates)
+    return result_to_exit_code(result)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -692,26 +334,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.extract_links:
             return run_link_extraction(args)
-
         if args.input_file:
-            return run_batch_mode(args, output_template)
-
-        if args.mode == "browser":
-            return result_to_exit_code(run_browser_mode(args, output_template))
-
-        if args.mode == "ytdlp":
-            return result_to_exit_code(run_ytdlp_mode(args, output_template))
-
-        return result_to_exit_code(
-            run_auto_download(
-                args,
-                args.url,
-                output_template,
-                progress_reporter=None,
-                progress_label="single",
-                show_candidates=True,
-            )
-        )
+            return run_batch(args, output_template)
+        return run_single(args, output_template)
     except KeyboardInterrupt:
         print("Interrupted by user.", file=sys.stderr)
         return 130
