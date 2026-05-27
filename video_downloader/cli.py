@@ -137,8 +137,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output.")
     parser.add_argument(
         "--dashboard",
+        dest="dashboard",
         action="store_true",
-        help="Use a full-screen terminal dashboard for batch progress.",
+        default=True,
+        help="Use a full-screen terminal dashboard for batch progress. Enabled by default.",
+    )
+    parser.add_argument(
+        "--no-dashboard",
+        dest="dashboard",
+        action="store_false",
+        help="Use the compact tqdm progress bars instead of the full-screen dashboard.",
     )
     parser.add_argument(
         "-x",
