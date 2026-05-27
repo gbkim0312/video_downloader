@@ -6,7 +6,13 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from .downloader import default_output_template, download_candidate, download_url
+from .downloader import (
+    DOWNLOAD_DOWNLOADED,
+    DOWNLOAD_SKIPPED,
+    default_output_template,
+    download_candidate,
+    download_url,
+)
 from .models import StreamCandidate
 from .progress import ProgressReporter
 from .scoring import ad_score, content_score, is_likely_ad, is_short_duration_only_ad
@@ -18,10 +24,28 @@ class BatchJob:
     url: str
 
 
+RESULT_DOWNLOADED = "downloaded"
+RESULT_SKIPPED = "skipped"
+RESULT_FAILED = "failed"
+SUCCESS_RESULTS = {
+    0,
+    RESULT_DOWNLOADED,
+    RESULT_SKIPPED,
+    DOWNLOAD_DOWNLOADED,
+    DOWNLOAD_SKIPPED,
+}
+
+
 class NoStreamCandidatesError(RuntimeError):
     def __init__(self, url: str) -> None:
         super().__init__(f"no stream candidates found for {url}")
         self.url = url
+
+
+def result_to_exit_code(result: int | str) -> int:
+    if isinstance(result, int):
+        return result
+    return 0 if result in SUCCESS_RESULTS else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -218,7 +242,7 @@ def select_candidates(
     return selectable[candidate_index - 1 :]
 
 
-def run_browser_mode(args: argparse.Namespace, output_template: str) -> int:
+def run_browser_mode(args: argparse.Namespace, output_template: str) -> int | str:
     return run_browser_download(
         args,
         args.url,
@@ -237,7 +261,7 @@ def run_browser_download(
     progress_reporter: ProgressReporter | None,
     progress_label: str,
     show_candidates: bool,
-) -> int:
+) -> int | str:
     try:
         from .sniffer import sniff_streams
     except ModuleNotFoundError as exc:
@@ -323,7 +347,7 @@ def run_browser_download(
                 print(f"Using page title for filename: {selected.page_title}")
 
         try:
-            download_candidate(
+            return download_candidate(
                 selected,
                 output_template=selected_output,
                 quiet=args.quiet or progress_reporter is not None,
@@ -331,7 +355,6 @@ def run_browser_download(
                 progress_label=progress_label,
                 fragment_parallel=args.fragment_parallel,
             )
-            return 0
         except Exception as exc:
             last_error = exc
             if attempt >= total_selected:
@@ -347,10 +370,10 @@ def run_browser_download(
 
     if last_error is not None:
         raise last_error
-    return 1
+    return RESULT_FAILED
 
 
-def run_ytdlp_mode(args: argparse.Namespace, output_template: str) -> int:
+def run_ytdlp_mode(args: argparse.Namespace, output_template: str) -> str:
     return run_ytdlp_download(
         args,
         args.url,
@@ -367,8 +390,8 @@ def run_ytdlp_download(
     *,
     progress_reporter: ProgressReporter | None,
     progress_label: str,
-) -> int:
-    download_url(
+) -> int | str:
+    return download_url(
         url,
         output_template=output_template,
         quiet=args.quiet or progress_reporter is not None,
@@ -376,7 +399,6 @@ def run_ytdlp_download(
         progress_label=progress_label,
         fragment_parallel=args.fragment_parallel,
     )
-    return 0
 
 
 def run_auto_download(
@@ -387,7 +409,7 @@ def run_auto_download(
     progress_reporter: ProgressReporter | None,
     progress_label: str,
     show_candidates: bool,
-) -> int:
+) -> int | str:
     try:
         return run_browser_download(
             args,
@@ -479,7 +501,7 @@ def process_one_url(
     *,
     progress_reporter: ProgressReporter,
     progress_label: str,
-) -> int:
+) -> int | str:
     try:
         if args.mode == "browser":
             return run_browser_download(
@@ -510,7 +532,7 @@ def process_one_url(
         )
     except Exception as exc:
         progress_reporter.message(progress_label, f"failed: {exc} url={url}")
-        return 1
+        return RESULT_FAILED
 
 
 def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
@@ -534,7 +556,11 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
     if args.headed and args.parallel > 1:
         print("--headed with --parallel > 1 opens multiple visible browsers.", file=sys.stderr)
 
-    reporter = ProgressReporter(enabled=not args.quiet, total_jobs=len(urls))
+    reporter = ProgressReporter(
+        enabled=not args.quiet,
+        total_jobs=len(urls),
+        worker_slots=args.parallel,
+    )
     reporter.message(
         "batch",
         (
@@ -545,7 +571,7 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
 
     jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
     failed_jobs = jobs
-    completed: set[int] = set()
+    completed: dict[int, str] = {}
     interrupted = False
     executor: ThreadPoolExecutor | None = None
     try:
@@ -562,7 +588,7 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
                 )
 
             executor = ThreadPoolExecutor(max_workers=args.parallel)
-            futures: dict[Future[int], tuple[BatchJob, str]] = {}
+            futures: dict[Future[int | str], tuple[BatchJob, str]] = {}
             for job in current_jobs:
                 label = f"{job.index}/{len(urls)} try {attempt}"
                 futures[
@@ -584,9 +610,15 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
                     reporter.message(label, f"failed: {exc} url={job.url}")
                     result = 1
 
-                if result == 0:
-                    completed.add(job.index)
-                    reporter.message(label, "done")
+                if result in SUCCESS_RESULTS:
+                    completed[job.index] = result
+                    if result == DOWNLOAD_SKIPPED:
+                        status = "skipped"
+                    elif result == 0:
+                        status = "done"
+                    else:
+                        status = "downloaded"
+                    reporter.message(label, status)
                     reporter.complete_job(label)
                     continue
 
@@ -613,6 +645,22 @@ def run_batch_mode(args: argparse.Namespace, output_template: str) -> int:
         return 130
 
     failures = len(urls) - len(completed)
+    downloaded_count = sum(
+        1 for result in completed.values() if result == DOWNLOAD_DOWNLOADED
+    )
+    skipped_count = sum(
+        1 for result in completed.values() if result == DOWNLOAD_SKIPPED
+    )
+    print(
+        (
+            "Summary: "
+            f"downloaded={downloaded_count}, "
+            f"skipped={skipped_count}, "
+            f"failed={failures}, "
+            f"total={len(urls)}"
+        ),
+        file=sys.stderr if failures else sys.stdout,
+    )
     if failures:
         failed_final = [job for job in jobs if job.index not in completed]
         print(
@@ -649,18 +697,20 @@ def main(argv: list[str] | None = None) -> int:
             return run_batch_mode(args, output_template)
 
         if args.mode == "browser":
-            return run_browser_mode(args, output_template)
+            return result_to_exit_code(run_browser_mode(args, output_template))
 
         if args.mode == "ytdlp":
-            return run_ytdlp_mode(args, output_template)
+            return result_to_exit_code(run_ytdlp_mode(args, output_template))
 
-        return run_auto_download(
-            args,
-            args.url,
-            output_template,
-            progress_reporter=None,
-            progress_label="single",
-            show_candidates=True,
+        return result_to_exit_code(
+            run_auto_download(
+                args,
+                args.url,
+                output_template,
+                progress_reporter=None,
+                progress_label="single",
+                show_candidates=True,
+            )
         )
     except KeyboardInterrupt:
         print("Interrupted by user.", file=sys.stderr)

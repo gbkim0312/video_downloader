@@ -29,6 +29,7 @@ class ProgressReporter:
         enabled: bool = True,
         min_interval: float = 0.2,
         total_jobs: int = 0,
+        worker_slots: int = 0,
     ) -> None:
         self.enabled = enabled
         self.min_interval = min_interval
@@ -37,7 +38,8 @@ class ProgressReporter:
         self._bars: dict[str, Any] = {}
         self._last_downloaded: dict[str, int] = {}
         self._positions: dict[str, int] = {}
-        self._next_position = 1
+        self._free_positions = list(range(1, worker_slots + 1))
+        self._next_position = worker_slots + 1
         self._overall = None
         self._tqdm = None
         if enabled and total_jobs:
@@ -79,7 +81,12 @@ class ProgressReporter:
         if not self.enabled:
             return
         with self._lock:
-            self._load_tqdm().write(f"[{label}] {text}", file=sys.stdout)
+            if label == "batch":
+                if self._overall is not None:
+                    self._overall.set_postfix_str(text, refresh=True)
+                return
+            bar = self._status_bar_for(label)
+            bar.set_description_str(f"{label}: {self._compact(text)}", refresh=True)
 
     def complete_job(self, label: str) -> None:
         if not self.enabled:
@@ -96,6 +103,10 @@ class ProgressReporter:
             bar = self._bars.pop(label, None)
             if bar is not None:
                 bar.close()
+            position = self._positions.pop(label, None)
+            if position is not None:
+                self._free_positions.append(position)
+                self._free_positions.sort()
             self._last_downloaded.pop(label, None)
             self._last_updated.pop(label, None)
 
@@ -115,12 +126,38 @@ class ProgressReporter:
     def _position_for(self, label: str) -> int:
         position = self._positions.get(label)
         if position is None:
-            position = self._next_position
-            self._next_position += 1
+            if self._free_positions:
+                position = self._free_positions.pop(0)
+            else:
+                position = self._next_position
+                self._next_position += 1
             self._positions[label] = position
         return position
 
-    def _bar_for(self, label: str, status: dict[str, Any]) -> tqdm:
+    def _compact(self, text: str, *, limit: int = 90) -> str:
+        cleaned = " ".join(text.split())
+        if len(cleaned) <= limit:
+            return cleaned
+        return cleaned[: limit - 3] + "..."
+
+    def _status_bar_for(self, label: str) -> Any:
+        bar = self._bars.get(label)
+        if bar is not None:
+            return bar
+
+        bar = self._load_tqdm()(
+            total=1,
+            desc=label,
+            position=self._position_for(label),
+            leave=False,
+            dynamic_ncols=True,
+            file=sys.stdout,
+            bar_format="{desc}",
+        )
+        self._bars[label] = bar
+        return bar
+
+    def _bar_for(self, label: str, status: dict[str, Any]) -> Any:
         total_bytes = status.get("total_bytes") or status.get("total_bytes_estimate")
         bar = self._bars.get(label)
         if bar is None:
@@ -130,16 +167,23 @@ class ProgressReporter:
                 desc=label,
                 unit="MB",
                 position=self._position_for(label),
-                leave=True,
+                leave=False,
                 dynamic_ncols=True,
                 file=sys.stdout,
-                bar_format="{l_bar}{bar}| {n:.1f}/{total_fmt} MB [{rate_fmt}]",
+                bar_format="{l_bar}{bar}| {n:.1f}/{total_fmt} MB [{rate_fmt}{postfix}]",
             )
             self._bars[label] = bar
             return bar
 
+        bar.unit = "MB"
+        bar.set_description_str(label, refresh=False)
+        bar.bar_format = "{l_bar}{bar}| {n:.1f}/{total_fmt} MB [{rate_fmt}{postfix}]"
         if total_bytes and bar.total is None:
             bar.total = bytes_to_mb(total_bytes)
+        elif total_bytes and bar.total == 1 and bar.n == 0:
+            bar.total = bytes_to_mb(total_bytes)
+        elif not total_bytes and bar.total == 1 and bar.n == 0:
+            bar.total = None
         return bar
 
     def _update_download(self, label: str, status: dict[str, Any]) -> None:
