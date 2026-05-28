@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urljoin
 
 from video_downloader.domain.models import ProxySettings, StreamCandidate
 
@@ -55,6 +57,26 @@ def headers_for_candidate(candidate: StreamCandidate) -> dict[str, str]:
 
 def _canonical_header_name(name: str) -> str:
     return "-".join(part.capitalize() for part in name.split("-"))
+
+
+def rewrite_hls_manifest_urls(text: str, base_url: str) -> str:
+    uri_pattern = re.compile(r'URI="([^"]+)"')
+    rewritten: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            rewritten.append(line)
+            continue
+        if stripped.startswith("#"):
+            rewritten.append(
+                uri_pattern.sub(
+                    lambda match: f'URI="{urljoin(base_url, match.group(1))}"',
+                    line,
+                )
+            )
+            continue
+        rewritten.append(urljoin(base_url, stripped))
+    return "\n".join(rewritten) + "\n"
 
 
 class YtDlpDownloader:
@@ -117,6 +139,8 @@ class YtDlpDownloader:
                 "ffmpeg": ["-hide_banner", "-loglevel", "error"],
             },
         }
+        if Path(url).exists():
+            options["enable_file_urls"] = True
         if headers:
             options["http_headers"] = headers
         if proxy_settings:
@@ -138,6 +162,23 @@ class YtDlpDownloader:
         proxy_settings: ProxySettings | None = None,
     ) -> str:
         headers = headers_for_candidate(candidate)
+        if candidate.kind == "hls" and candidate.manifest_text.startswith("#EXTM3U"):
+            with tempfile.TemporaryDirectory(prefix="video-dl-hls-") as temp_dir:
+                manifest_path = Path(temp_dir) / "manifest.m3u8"
+                manifest_path.write_text(
+                    rewrite_hls_manifest_urls(candidate.manifest_text, candidate.url),
+                    encoding="utf-8",
+                )
+                return self.download_url(
+                    str(manifest_path),
+                    output_template=output_template,
+                    headers=headers,
+                    quiet=quiet,
+                    progress_hook=progress_hook,
+                    progress_label=progress_label,
+                    fragment_parallel=fragment_parallel,
+                    proxy_settings=proxy_settings,
+                )
         return self.download_url(
             candidate.url,
             output_template=output_template,

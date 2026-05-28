@@ -99,6 +99,8 @@ def dedupe_candidates(candidates: Iterable[StreamCandidate]) -> list[StreamCandi
             existing.duration = candidate.duration
         if existing.byte_length is None and candidate.byte_length is not None:
             existing.byte_length = candidate.byte_length
+        if not existing.manifest_text and candidate.manifest_text:
+            existing.manifest_text = candidate.manifest_text
     return list(by_url.values())
 
 
@@ -427,6 +429,7 @@ class BrowserStreamSniffer:
                 text = await response.text()
             except Exception:
                 text = ""
+            candidate.manifest_text = text
             if candidate.kind == "hls":
                 candidate.duration = parse_hls_duration(text)
             elif candidate.kind == "dash":

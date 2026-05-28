@@ -18,6 +18,7 @@ class StreamCandidate:
     discovered_at: float = 0.0
     request_headers: dict[str, str] = field(default_factory=dict)
     response_headers: dict[str, str] = field(default_factory=dict)
+    manifest_text: str = ""
 
     @property
     def host(self) -> str:
