@@ -96,6 +96,20 @@ def dedupe_candidates(candidates: Iterable[StreamCandidate]) -> list[StreamCandi
     return list(by_url.values())
 
 
+def cookie_header_for_host(cookies: list[dict[str, Any]], host: str) -> str:
+    values = []
+    normalized_host = host.lower()
+    for cookie in cookies:
+        domain = str(cookie.get("domain", "")).lstrip(".").lower()
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not domain or not name:
+            continue
+        if normalized_host == domain or normalized_host.endswith(f".{domain}"):
+            values.append(f"{name}={value}")
+    return "; ".join(values)
+
+
 class BrowserStreamSniffer:
     def __init__(
         self,
@@ -161,6 +175,12 @@ class BrowserStreamSniffer:
                 for candidate in candidates:
                     if not candidate.page_title:
                         candidate.page_title = page_title
+            cookies = await context.cookies()
+            for candidate in candidates:
+                if "cookie" not in candidate.request_headers:
+                    cookie_header = cookie_header_for_host(cookies, candidate.host)
+                    if cookie_header:
+                        candidate.request_headers["cookie"] = cookie_header
 
             await self._close(context, browser)
 

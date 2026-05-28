@@ -10,6 +10,20 @@ from video_downloader.domain.models import ProxySettings, StreamCandidate
 ProgressHook = Callable[[str, dict[str, Any]], None]
 DOWNLOAD_DOWNLOADED = "downloaded"
 DOWNLOAD_SKIPPED = "skipped"
+FORWARDED_HEADER_NAMES = {
+    "accept",
+    "accept-language",
+    "cookie",
+    "origin",
+    "referer",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "sec-fetch-dest",
+    "sec-fetch-mode",
+    "sec-fetch-site",
+    "user-agent",
+}
 
 
 def sanitize_filename(value: str, *, max_length: int = 200) -> str:
@@ -24,6 +38,23 @@ def default_output_template(output_dir: str | Path, title: str = "") -> str:
     if safe_title:
         return str(path / f"{safe_title}.%(ext)s")
     return str(path / "%(title).200B.%(ext)s")
+
+
+def headers_for_candidate(candidate: StreamCandidate) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for name, value in candidate.request_headers.items():
+        lower_name = name.lower()
+        if lower_name in FORWARDED_HEADER_NAMES and value:
+            headers[_canonical_header_name(lower_name)] = value
+    if candidate.user_agent:
+        headers["User-Agent"] = candidate.user_agent
+    if candidate.referer:
+        headers["Referer"] = candidate.referer
+    return headers
+
+
+def _canonical_header_name(name: str) -> str:
+    return "-".join(part.capitalize() for part in name.split("-"))
 
 
 class YtDlpDownloader:
@@ -93,11 +124,7 @@ class YtDlpDownloader:
         fragment_parallel: int = 4,
         proxy_settings: ProxySettings | None = None,
     ) -> str:
-        headers = {}
-        if candidate.user_agent:
-            headers["User-Agent"] = candidate.user_agent
-        if candidate.referer:
-            headers["Referer"] = candidate.referer
+        headers = headers_for_candidate(candidate)
         return self.download_url(
             candidate.url,
             output_template=output_template,
