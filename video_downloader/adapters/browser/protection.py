@@ -45,13 +45,19 @@ async def install_popup_protection(context: Any, *, allow_popups: bool = False) 
     if allow_popups:
         return
 
+    async def has_opener(page: Any) -> bool:
+        try:
+            return await page.opener() is not None
+        except Exception:
+            return False
+
     async def close_ad_page(page: Any) -> None:
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=3000)
         except Exception:
             pass
         try:
-            if looks_like_ad_popup_url(page.url):
+            if await has_opener(page) and looks_like_ad_popup_url(page.url):
                 await page.close()
         except Exception:
             pass
@@ -59,7 +65,11 @@ async def install_popup_protection(context: Any, *, allow_popups: bool = False) 
     async def on_frame_navigated(frame: Any) -> None:
         try:
             page = frame.page
-            if frame == page.main_frame and looks_like_ad_popup_url(frame.url):
+            if (
+                await has_opener(page)
+                and frame == page.main_frame
+                and looks_like_ad_popup_url(frame.url)
+            ):
                 await page.close()
         except Exception:
             pass
