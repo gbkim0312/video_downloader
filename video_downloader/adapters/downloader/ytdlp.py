@@ -4,7 +4,7 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from video_downloader.domain.models import ProxySettings, StreamCandidate
 
@@ -79,6 +79,15 @@ def rewrite_hls_manifest_urls(text: str, base_url: str) -> str:
     return "\n".join(rewritten) + "\n"
 
 
+def is_file_input(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme == "file":
+        return True
+    if parsed.scheme:
+        return False
+    return Path(url).exists()
+
+
 class YtDlpDownloader:
     def download_url(
         self,
@@ -139,7 +148,7 @@ class YtDlpDownloader:
                 "ffmpeg": ["-hide_banner", "-loglevel", "error"],
             },
         }
-        if Path(url).exists():
+        if is_file_input(url):
             options["enable_file_urls"] = True
         if headers:
             options["http_headers"] = headers
@@ -170,7 +179,7 @@ class YtDlpDownloader:
                     encoding="utf-8",
                 )
                 return self.download_url(
-                    str(manifest_path),
+                    manifest_path.as_uri(),
                     output_template=output_template,
                     headers=headers,
                     quiet=quiet,
