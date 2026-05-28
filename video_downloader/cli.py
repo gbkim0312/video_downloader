@@ -492,6 +492,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except Exception as exc:
+        print(f"Download failed: {exc}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         print("Interrupted by user.", file=sys.stderr)
         return 130

@@ -291,7 +291,12 @@ class DownloadService:
                 )
 
         if last_error is not None:
-            raise last_error
+            self._message(
+                progress_reporter,
+                progress_label,
+                f"failed after trying stream candidates: {last_error}",
+            )
+            return RESULT_FAILED, candidates
         return RESULT_FAILED, candidates
 
     def download_prefetched(
