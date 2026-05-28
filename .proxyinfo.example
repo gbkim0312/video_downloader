@@ -23,3 +23,6 @@ PROXY_IP_CHECK_URL=https://api.ipify.org
 
 # Stop before any browser/download work if proxy IP cannot be verified.
 PROXY_KILL_SWITCH=true
+
+# Number of times to verify the proxy connection before failing.
+PROXY_CONNECT_RETRIES=3

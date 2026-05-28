@@ -27,6 +27,7 @@ def read_proxy_info(path: str | Path = DEFAULT_PROXY_INFO_PATH) -> ProxySettings
         rotate_on_status=_status_codes(values.get("TOR_ROTATE_ON_STATUS")),
         ip_check_url=values.get("PROXY_IP_CHECK_URL", "https://api.ipify.org"),
         kill_switch=_bool_value(values.get("PROXY_KILL_SWITCH"), True),
+        connect_retries=_int_value(values.get("PROXY_CONNECT_RETRIES"), 3),
     )
 
 
@@ -65,6 +66,10 @@ def _int_value(value: str | None, default: int) -> int:
 def _float_value(value: str | None, default: float) -> float:
     if value is None:
         return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 def _bool_value(value: str | None, default: bool) -> bool:
@@ -76,10 +81,6 @@ def _bool_value(value: str | None, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
 
 
 def _status_codes(value: str | None) -> tuple[int, ...]:

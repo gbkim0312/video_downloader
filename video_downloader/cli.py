@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
 
 from .adapters.browser.link_extractor import PlaywrightLinkExtractor
@@ -100,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--proxy-info",
         default=DEFAULT_PROXY_INFO_PATH,
         help="Proxy config file used with --use-proxy. Default: .proxyinfo.",
+    )
+    parser.add_argument(
+        "--proxy-connect-retries",
+        type=int,
+        default=None,
+        help="Proxy verification attempts before failing. Default: .proxyinfo or 3.",
     )
     parser.add_argument(
         "-s",
@@ -228,14 +236,35 @@ def configure_proxy(args: argparse.Namespace) -> None:
     if not args.use_proxy:
         return
     settings = read_proxy_info(args.proxy_info)
-    try:
-        ip_address = TorController().current_ip(settings)
-    except Exception as exc:
+    if args.proxy_connect_retries is not None:
+        if args.proxy_connect_retries < 1:
+            raise ValueError("--proxy-connect-retries must be at least 1")
+        settings = replace(settings, connect_retries=args.proxy_connect_retries)
+
+    controller = TorController()
+    attempts = max(1, settings.connect_retries)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            ip_address = controller.current_ip(settings)
+            break
+        except Exception as exc:
+            last_error = exc
+            if not args.quiet:
+                print(
+                    f"proxy check failed ({attempt}/{attempts}): {exc}",
+                    file=sys.stderr,
+                )
+            if attempt < attempts:
+                time.sleep(1)
+    else:
         if settings.kill_switch:
             raise ValueError(
-                f"Proxy kill switch: cannot verify proxy connection ({exc})"
-            ) from exc
-        ip_address = f"unavailable ({exc})"
+                "Proxy kill switch: cannot verify proxy connection "
+                f"after {attempts} attempt(s) ({last_error})"
+            ) from last_error
+        ip_address = f"unavailable after {attempts} attempt(s) ({last_error})"
+
     args.proxy_settings = settings
     if not args.quiet:
         print(f"proxy IP: {ip_address}")
@@ -379,11 +408,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.extract_links and args.input_file is not None:
         parser.error("--extract-links works with a page URL, not --input-file")
 
-    output_template = args.output_template or default_output_template(args.output_dir)
-    Path(output_template).parent.mkdir(parents=True, exist_ok=True)
-
     try:
         configure_proxy(args)
+        output_template = args.output_template or default_output_template(args.output_dir)
+        Path(output_template).parent.mkdir(parents=True, exist_ok=True)
         if args.extract_links:
             return run_link_extraction(args)
         if args.input_file:

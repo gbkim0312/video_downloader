@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from video_downloader.adapters.downloader.ytdlp import (
     DOWNLOAD_DOWNLOADED,
@@ -81,14 +82,21 @@ class DownloadService:
         return f"proxy IP: {self.require_proxy_connection(settings)}"
 
     def require_proxy_connection(self, settings: ProxySettings) -> str:
-        try:
-            return self.tor_controller.current_ip(settings)
-        except Exception as exc:
-            if settings.kill_switch:
-                raise ProxyUnavailableError(
-                    f"Proxy kill switch: cannot verify proxy connection ({exc})"
-                ) from exc
-            return f"unavailable ({exc})"
+        attempts = max(1, settings.connect_retries)
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.tor_controller.current_ip(settings)
+            except Exception as exc:
+                last_error = exc
+                if attempt < attempts:
+                    time.sleep(1)
+        if settings.kill_switch:
+            raise ProxyUnavailableError(
+                "Proxy kill switch: cannot verify proxy connection "
+                f"after {attempts} attempt(s) ({last_error})"
+            ) from last_error
+        return f"unavailable after {attempts} attempt(s) ({last_error})"
 
     def select_candidates(
         self,
