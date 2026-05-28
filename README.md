@@ -51,6 +51,12 @@ video-dl "https://example.com/watch/123" --headed --no-auto-click --user-data-di
 video-dl "https://example.com/watch/123" --headed --browser-channel chrome --spoof-browser -s 120
 ```
 
+일부 사이트는 로딩 중 `about:blank`를 히스토리에 끼워 넣어서, 자동 blank 복구가 오히려 페이지 이동을 흔들 수 있습니다. 본 페이지가 보였다가 다시 빈 페이지로 돌아가는 증상이 있으면 blank 복구를 끕니다.
+
+```bash
+video-dl "https://example.com/watch/123" --headed --no-auto-click --no-blank-restore -s 120
+```
+
 재생 버튼 클릭 시 뜨는 악성 광고 팝업은 기본으로 닫고, 명확한 광고 네트워크 요청은 차단합니다. 새 탭에서 실제 영상이 열리는 경우를 위해 광고처럼 보이지 않는 새 탭은 유지하며, 스트림 감지는 열린 모든 탭에서 수행합니다. 영상 사이트가 정상 동작하는 데 팝업 차단이 방해될 때만 끌 수 있습니다.
 
 ```bash
@@ -222,6 +228,7 @@ video-dl -i sites.txt -j 3
 | `--user-data-dir` | Chromium 프로필 디렉토리 유지 |
 | `--browser-channel` | `chrome`, `msedge` 같은 설치된 브라우저 채널 사용 |
 | `--spoof-browser` | Chrome-like UA/locale/header와 자동화 흔적 완화 적용 |
+| `--no-blank-restore` | `about:blank` 자동 복구 끄기 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |

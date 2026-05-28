@@ -19,6 +19,7 @@ class StreamSnifferPort(Protocol):
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
         spoof_browser: bool = False,
+        restore_blank: bool = True,
     ) -> list[StreamCandidate]:
         """Return playable media stream candidates observed from a browser page."""
 

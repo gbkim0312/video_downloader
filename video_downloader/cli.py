@@ -145,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-blank-restore",
+        action="store_true",
+        help="Do not re-open the original URL when the page navigates to about:blank.",
+    )
+    parser.add_argument(
         "--allow-popups",
         action="store_true",
         help="Allow new tabs/popups. By default they are closed and known ad requests are blocked.",
@@ -241,6 +246,7 @@ def make_download_options(args: argparse.Namespace) -> DownloadOptions:
         user_data_dir=args.user_data_dir,
         browser_channel=args.browser_channel,
         spoof_browser=args.spoof_browser,
+        restore_blank=not args.no_blank_restore,
     )
 
 

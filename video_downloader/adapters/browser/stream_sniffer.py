@@ -128,6 +128,7 @@ class BrowserStreamSniffer:
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
         spoof_browser: bool = False,
+        restore_blank: bool = True,
     ) -> None:
         self.headless = headless
         self.user_agent = user_agent
@@ -138,6 +139,7 @@ class BrowserStreamSniffer:
         self.user_data_dir = user_data_dir
         self.browser_channel = browser_channel
         self.spoof_browser = spoof_browser
+        self.restore_blank = restore_blank
 
     async def sniff(self, url: str) -> list[StreamCandidate]:
         try:
@@ -283,7 +285,9 @@ class BrowserStreamSniffer:
                 pass
 
     async def _restore_blank_page(self, page: Any, url: str) -> None:
-        if page.url != "about:blank":
+        if not self.restore_blank or page.url != "about:blank":
+            return
+        if not self.headless:
             return
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -349,6 +353,7 @@ def sniff_streams(
     user_data_dir: str | None = None,
     browser_channel: str | None = None,
     spoof_browser: bool = False,
+    restore_blank: bool = True,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
@@ -360,6 +365,7 @@ def sniff_streams(
         user_data_dir=user_data_dir,
         browser_channel=browser_channel,
         spoof_browser=spoof_browser,
+        restore_blank=restore_blank,
     )
     return asyncio.run(sniffer.sniff(url))
 
@@ -378,6 +384,7 @@ class PlaywrightStreamSniffer:
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
         spoof_browser: bool = False,
+        restore_blank: bool = True,
     ) -> list[StreamCandidate]:
         return sniff_streams(
             url,
@@ -390,4 +397,5 @@ class PlaywrightStreamSniffer:
             user_data_dir=user_data_dir,
             browser_channel=browser_channel,
             spoof_browser=spoof_browser,
+            restore_blank=restore_blank,
         )

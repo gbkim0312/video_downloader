@@ -62,6 +62,7 @@ class DownloadOptions:
     user_data_dir: str | None = None
     browser_channel: str | None = None
     spoof_browser: bool = False
+    restore_blank: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +184,7 @@ class DownloadService:
             user_data_dir=options.user_data_dir,
             browser_channel=options.browser_channel,
             spoof_browser=options.spoof_browser,
+            restore_blank=options.restore_blank,
         )
 
         if not options.quiet:
