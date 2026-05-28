@@ -69,6 +69,30 @@ video-dl "https://example.com/watch/123" -l --headed --no-auto-click --no-blank-
 video-dl "https://example.com/watch/123" -l --headed --no-auto-click --no-blank-restore --block-devtool-detectors -s 120
 ```
 
+후후티비처럼 `disable-devtool` 감지와 리다이렉트가 있는 사이트는 브라우저 감지 모드로만 받는 편이 안정적입니다. 단일 영상은 자동 클릭과 blank 복구를 끄고 anti-devtools 스크립트를 차단합니다.
+
+```bash
+video-dl "https://hoohootv.example/detail/..." \
+  --mode browser \
+  --no-auto-click \
+  --no-blank-restore \
+  --block-devtool-detectors \
+  -s 5 \
+  -o ./downloads
+```
+
+후보만 먼저 확인하려면 `-l`을 붙입니다.
+
+```bash
+video-dl "https://hoohootv.example/detail/..." \
+  -l \
+  --mode browser \
+  --no-auto-click \
+  --no-blank-restore \
+  --block-devtool-detectors \
+  -s 5
+```
+
 재생 버튼 클릭 시 뜨는 악성 광고 팝업은 기본으로 닫고, 명확한 광고 네트워크 요청은 차단합니다. 새 탭에서 실제 영상이 열리는 경우를 위해 광고처럼 보이지 않는 새 탭은 유지하며, 스트림 감지는 열린 모든 탭에서 수행합니다. 영상 사이트가 정상 동작하는 데 팝업 차단이 방해될 때만 끌 수 있습니다.
 
 ```bash
@@ -172,6 +196,20 @@ video-dl -i sites.txt -j 3
 
 ```bash
 video-dl -i sites.txt -j 5 --sniff-parallel 1
+```
+
+후후티비 같은 사이트를 여러 개 받을 때는 브라우저 스니핑을 하나씩만 수행하고, `yt-dlp` fallback을 피하기 위해 `--mode browser`를 같이 쓰는 것을 권장합니다. 배치 모드에서는 기본 파일명 앞에 `01 -`, `02 -` 같은 번호가 붙어 에피소드 제목이 같아도 충돌을 줄입니다.
+
+```bash
+video-dl -i ./downloads/conan_24.site \
+  -o ./downloads \
+  --mode browser \
+  --no-auto-click \
+  --no-blank-restore \
+  --block-devtool-detectors \
+  -s 5 \
+  -j 5 \
+  --sniff-parallel 1
 ```
 
 배치 모드는 기본적으로 `htop`처럼 터미널 전체 화면에서 고정된 표 형태로 진행률을 표시합니다. 예전처럼 일반 tqdm 진행바를 쓰려면 `--no-dashboard`를 붙이면 됩니다.
