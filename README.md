@@ -198,7 +198,7 @@ video-dl -i sites.txt -j 3
 video-dl -i sites.txt -j 5 --sniff-parallel 1
 ```
 
-후후티비 같은 사이트를 여러 개 받을 때는 브라우저 스니핑을 하나씩만 수행하고, `yt-dlp` fallback을 피하기 위해 `--mode browser`를 같이 쓰는 것을 권장합니다. 배치 모드에서는 기본 파일명 앞에 `01 -`, `02 -` 같은 번호가 붙어 에피소드 제목이 같아도 충돌을 줄입니다.
+후후티비 같은 사이트를 여러 개 받을 때는 브라우저 스니핑을 하나씩만 수행하고, `yt-dlp` fallback을 피하기 위해 `--mode browser`를 같이 쓰는 것을 권장합니다. 에피소드 제목이 같아 파일명이 충돌하면 `--number-filenames`로 기본 파일명 앞에 `01 -`, `02 -` 같은 번호를 붙일 수 있습니다.
 
 ```bash
 video-dl -i ./downloads/conan_24.site \
@@ -209,7 +209,8 @@ video-dl -i ./downloads/conan_24.site \
   --block-devtool-detectors \
   -s 5 \
   -j 5 \
-  --sniff-parallel 1
+  --sniff-parallel 1 \
+  --number-filenames
 ```
 
 배치 모드는 기본적으로 `htop`처럼 터미널 전체 화면에서 고정된 표 형태로 진행률을 표시합니다. 예전처럼 일반 tqdm 진행바를 쓰려면 `--no-dashboard`를 붙이면 됩니다.
@@ -270,6 +271,7 @@ video-dl -i sites.txt -j 3
 | `-i`, `--input-file` | 한 줄에 하나씩 URL이 있는 파일 |
 | `-j`, `--parallel` | 배치 다운로드 동시 실행 수 |
 | `--sniff-parallel` | 배치에서 브라우저 스니핑 동시 실행 수 |
+| `--number-filenames` | 배치 저장 파일명 앞에 URL 번호 붙이기 |
 | `-F`, `--fragment-parallel` | HLS/DASH 조각 동시 다운로드 수 |
 | `-r`, `--retries` | 실패 URL 재시도 횟수 |
 | `--dashboard` | 배치 진행률을 전체 화면 표 형태로 표시. 기본값 |

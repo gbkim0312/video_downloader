@@ -73,6 +73,7 @@ class BatchOptions:
     parallel: int = 1
     sniff_parallel: int | None = None
     retries: int = 3
+    number_filenames: bool = False
 
 
 class DownloadService:
@@ -681,6 +682,7 @@ class BatchDownloadService:
                                 output_template,
                                 self._job_options(
                                     download_options,
+                                    batch_options,
                                     job,
                                     total_jobs,
                                 ),
@@ -723,7 +725,12 @@ class BatchDownloadService:
                         self._process_one,
                         job.url,
                         output_template,
-                        self._job_options(download_options, job, total_jobs),
+                        self._job_options(
+                            download_options,
+                            batch_options,
+                            job,
+                            total_jobs,
+                        ),
                         reporter,
                         label,
                     )
@@ -765,9 +772,12 @@ class BatchDownloadService:
     def _job_options(
         self,
         options: DownloadOptions,
+        batch_options: BatchOptions,
         job: BatchJob,
         total_jobs: int,
     ) -> DownloadOptions:
+        if not batch_options.number_filenames:
+            return options
         width = max(2, len(str(total_jobs)))
         return replace(options, filename_prefix=f"{job.index:0{width}d}")
 

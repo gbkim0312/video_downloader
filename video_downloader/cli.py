@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--number-filenames",
+        action="store_true",
+        help="Prefix batch output filenames with the URL index, such as 01 - title.mp4.",
+    )
+    parser.add_argument(
         "-F",
         "--fragment-parallel",
         type=int,
@@ -430,6 +435,7 @@ def run_batch(args: argparse.Namespace, output_template: str) -> int:
                 parallel=args.parallel,
                 sniff_parallel=args.sniff_parallel,
                 retries=args.retries,
+                number_filenames=args.number_filenames,
             ),
         )
     except ValueError as exc:
