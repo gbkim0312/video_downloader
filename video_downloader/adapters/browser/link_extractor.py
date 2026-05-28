@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from .context import browser_launch_options, new_desktop_context
 from .protection import install_popup_protection, looks_like_ad_popup_url
 from video_downloader.domain.models import LinkCandidate
 from video_downloader.domain.scoring import dedupe_links, score_link
@@ -25,11 +26,8 @@ async def _extract_links(
         ) from exc
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
-        context = await browser.new_context(
-            user_agent=user_agent,
-            viewport={"width": 1365, "height": 900},
-        )
+        browser = await p.chromium.launch(**browser_launch_options(headless=headless))
+        context = await new_desktop_context(browser, user_agent=user_agent)
         await install_popup_protection(context, allow_popups=allow_popups)
         page = await context.new_page()
         try:

@@ -334,10 +334,14 @@ def run_batch(args: argparse.Namespace, output_template: str) -> int:
 
 
 def run_single(args: argparse.Namespace, output_template: str) -> int:
-    result, candidates = make_download_service().download(
+    service = make_download_service()
+    options = make_download_options(args)
+    if options.proxy_settings and not options.quiet:
+        print(service.proxy_ip_message(options.proxy_settings))
+    result, candidates = service.download(
         args.url,
         output_template,
-        options=make_download_options(args),
+        options=options,
         progress_reporter=None,
         progress_label="single",
         show_candidates=True,

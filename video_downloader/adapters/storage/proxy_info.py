@@ -25,6 +25,7 @@ def read_proxy_info(path: str | Path = DEFAULT_PROXY_INFO_PATH) -> ProxySettings
         newnym_delay=_float_value(values.get("TOR_NEWNYM_DELAY"), 10),
         rotation_retries=_int_value(values.get("TOR_ROTATION_RETRIES"), 1),
         rotate_on_status=_status_codes(values.get("TOR_ROTATE_ON_STATUS")),
+        ip_check_url=values.get("PROXY_IP_CHECK_URL", "https://api.ipify.org"),
     )
 
 

@@ -73,6 +73,13 @@ class DownloadService:
         self.downloader = downloader
         self.tor_controller = tor_controller or TorController()
 
+    def proxy_ip_message(self, settings: ProxySettings) -> str:
+        try:
+            ip_address = self.tor_controller.current_ip(settings)
+        except Exception as exc:
+            return f"proxy IP: unavailable ({exc})"
+        return f"proxy IP: {ip_address}"
+
     def select_candidates(
         self,
         candidates: list[StreamCandidate],
@@ -353,6 +360,12 @@ class DownloadService:
                         ),
                     )
                 self.tor_controller.rotate_identity(settings)
+                if not options.quiet:
+                    self._message(
+                        progress_reporter,
+                        progress_label,
+                        self.proxy_ip_message(settings),
+                    )
 
         if last_error is not None:
             raise last_error
@@ -394,6 +407,11 @@ class BatchDownloadService:
             total_jobs=len(urls),
             worker_slots=batch_options.parallel,
         )
+        if download_options.proxy_settings and not download_options.quiet:
+            reporter.message(
+                "batch",
+                self.download_service.proxy_ip_message(download_options.proxy_settings),
+            )
         jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
         failed_jobs = jobs
         completed: dict[int, str] = {}

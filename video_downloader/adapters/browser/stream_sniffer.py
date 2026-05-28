@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
 
+from .context import browser_launch_options, new_desktop_context
 from .protection import install_popup_protection
 from video_downloader.domain.models import ProxySettings, StreamCandidate
 from video_downloader.domain.scoring import content_score
@@ -125,14 +126,15 @@ class BrowserStreamSniffer:
         pending: set[asyncio.Task[None]] = set()
 
         async with async_playwright() as p:
-            launch_options: dict[str, Any] = {"headless": self.headless}
-            if self.proxy_settings:
-                launch_options["proxy"] = {"server": self.proxy_settings.proxy_url}
-            browser = await p.chromium.launch(**launch_options)
-            context = await browser.new_context(
-                user_agent=self.user_agent,
-                viewport={"width": 1365, "height": 900},
+            browser = await p.chromium.launch(
+                **browser_launch_options(
+                    headless=self.headless,
+                    proxy_url=(
+                        self.proxy_settings.proxy_url if self.proxy_settings else None
+                    ),
+                )
             )
+            context = await new_desktop_context(browser, user_agent=self.user_agent)
             await install_popup_protection(context, allow_popups=self.allow_popups)
 
             def schedule(response: Any) -> None:

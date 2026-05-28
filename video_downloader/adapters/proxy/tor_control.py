@@ -50,6 +50,22 @@ class TorController:
             if settings.newnym_delay > 0:
                 time.sleep(settings.newnym_delay)
 
+    def current_ip(self, settings: ProxySettings) -> str:
+        try:
+            import requests
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Missing dependency: requests. Install with `pip install -e .`."
+            ) from exc
+
+        response = requests.get(
+            settings.ip_check_url,
+            proxies={"http": settings.proxy_url, "https": settings.proxy_url},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.text.strip()
+
     def _auth_command(self, password: str | None) -> str:
         if not password:
             return "AUTHENTICATE\r\n"

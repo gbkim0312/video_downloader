@@ -35,6 +35,8 @@ video-dl "https://example.com/watch/123" -l
 video-dl "https://example.com/watch/123" --headed -s 45
 ```
 
+헤드리스에서도 기본적으로 데스크톱 크롬 User-Agent, 한국어 locale, timezone, 일반 브라우저 헤더를 넣습니다. 특정 사이트가 그래도 차단하면 `--headed`로 확인하거나 `--user-agent`로 직접 값을 지정할 수 있습니다.
+
 재생 버튼 클릭 시 뜨는 악성 광고 팝업은 기본으로 닫고, 명확한 광고 네트워크 요청은 차단합니다. 새 탭에서 실제 영상이 열리는 경우를 위해 광고처럼 보이지 않는 새 탭은 유지하며, 스트림 감지는 열린 모든 탭에서 수행합니다. 영상 사이트가 정상 동작하는 데 팝업 차단이 방해될 때만 끌 수 있습니다.
 
 ```bash
@@ -86,9 +88,11 @@ TOR_CONTROL_PASSWORD=plain-control-password
 TOR_NEWNYM_DELAY=10
 TOR_ROTATION_RETRIES=1
 TOR_ROTATE_ON_STATUS=403,429,500,502,503,504
+PROXY_IP_CHECK_URL=https://api.ipify.org
 ```
 
 `TOR_CONTROL_PASSWORD`에는 `TOR_HashedControlPassword` 값이 아니라 ControlPort 인증에 쓰는 평문 비밀번호를 넣어야 합니다. 다운로드 중 403, 429, 5xx 계열 에러가 발생하면 Tor에 `SIGNAL NEWNYM`을 요청하고 `TOR_NEWNYM_DELAY`초 기다린 뒤 같은 다운로드를 다시 시도합니다.
+프록시를 쓰면 시작 시점의 현재 프록시 IP를 로그에 남기고, IP 변경 후에도 새 IP를 다시 확인합니다. IP 확인 주소는 `PROXY_IP_CHECK_URL`로 바꿀 수 있습니다.
 병렬 다운로드 중 여러 작업이 동시에 차단되더라도 IP 변경 요청은 하나씩 순서대로 처리합니다.
 
 출력 디렉토리 지정:
