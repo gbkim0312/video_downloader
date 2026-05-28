@@ -434,14 +434,19 @@ def run_batch(args: argparse.Namespace, output_template: str) -> int:
 def run_single(args: argparse.Namespace, output_template: str) -> int:
     service = make_download_service()
     options = make_download_options(args)
-    result, candidates = service.download(
-        args.url,
-        output_template,
-        options=options,
-        progress_reporter=None,
-        progress_label="single",
-        show_candidates=True,
-    )
+    reporter = ProgressReporter(enabled=not options.quiet, worker_slots=1)
+    try:
+        result, candidates = service.download(
+            args.url,
+            output_template,
+            options=options,
+            progress_reporter=reporter,
+            progress_label="single",
+            show_candidates=True,
+        )
+        reporter.complete_job("single")
+    finally:
+        reporter.close()
     if candidates:
         print_candidates(candidates)
     return result_to_exit_code(result)
