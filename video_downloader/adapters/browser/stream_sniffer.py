@@ -149,6 +149,7 @@ class BrowserStreamSniffer:
         started = time.monotonic()
         candidates: list[StreamCandidate] = []
         pending: set[asyncio.Task[None]] = set()
+        observed_pages: list[Any] = []
 
         async with async_playwright() as p:
             proxy_url = self.proxy_settings.proxy_url if self.proxy_settings else None
@@ -183,6 +184,8 @@ class BrowserStreamSniffer:
                 task.add_done_callback(pending.discard)
 
             def attach_page(page: Any) -> None:
+                if page not in observed_pages:
+                    observed_pages.append(page)
                 page.on("response", schedule)
 
             context.on("page", attach_page)
@@ -193,12 +196,12 @@ class BrowserStreamSniffer:
             )
             attach_page(page)
             await self._open_and_play(page, url)
-            await page.wait_for_timeout(int(self.play_seconds * 1000))
+            await asyncio.sleep(self.play_seconds)
 
             if pending:
                 await asyncio.wait(pending, timeout=10)
 
-            page_title = (await page.title()).strip()
+            page_title = await self._page_title(observed_pages)
             if page_title:
                 for candidate in candidates:
                     if not candidate.page_title:
@@ -215,9 +218,24 @@ class BrowserStreamSniffer:
         unique = dedupe_candidates(candidates)
         return sorted(unique, key=content_score, reverse=True)
 
+    async def _page_title(self, pages: list[Any]) -> str:
+        for page in reversed(pages):
+            try:
+                if page.is_closed() or page.url == "about:blank":
+                    continue
+                title = (await page.title()).strip()
+                if title:
+                    return title
+            except Exception:
+                continue
+        return ""
+
     async def _open_and_play(self, page: Any, url: str) -> None:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(1500)
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        except Exception:
+            return
+        await asyncio.sleep(1.5)
         await self._restore_blank_page(page, url)
         if not self.auto_click:
             return
