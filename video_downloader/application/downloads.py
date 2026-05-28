@@ -61,6 +61,7 @@ class DownloadOptions:
     auto_click: bool = True
     user_data_dir: str | None = None
     browser_channel: str | None = None
+    spoof_browser: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +182,7 @@ class DownloadService:
             auto_click=options.auto_click,
             user_data_dir=options.user_data_dir,
             browser_channel=options.browser_channel,
+            spoof_browser=options.spoof_browser,
         )
 
         if not options.quiet:

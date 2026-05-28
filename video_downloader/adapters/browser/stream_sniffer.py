@@ -127,6 +127,7 @@ class BrowserStreamSniffer:
         auto_click: bool = True,
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
+        spoof_browser: bool = False,
     ) -> None:
         self.headless = headless
         self.user_agent = user_agent
@@ -136,6 +137,7 @@ class BrowserStreamSniffer:
         self.auto_click = auto_click
         self.user_data_dir = user_data_dir
         self.browser_channel = browser_channel
+        self.spoof_browser = spoof_browser
 
     async def sniff(self, url: str) -> list[StreamCandidate]:
         try:
@@ -161,19 +163,29 @@ class BrowserStreamSniffer:
                         headless=self.headless,
                         proxy_url=proxy_url,
                         browser_channel=self.browser_channel,
+                        spoof_browser=self.spoof_browser,
                     ),
-                    **desktop_context_options(user_agent=self.user_agent),
+                    **desktop_context_options(
+                        user_agent=self.user_agent,
+                        spoof_browser=self.spoof_browser,
+                    ),
                 )
-                await harden_context(context)
+                if self.spoof_browser:
+                    await harden_context(context)
             else:
                 browser = await p.chromium.launch(
                     **browser_launch_options(
                         headless=self.headless,
                         proxy_url=proxy_url,
                         browser_channel=self.browser_channel,
+                        spoof_browser=self.spoof_browser,
                     )
                 )
-                context = await new_desktop_context(browser, user_agent=self.user_agent)
+                context = await new_desktop_context(
+                    browser,
+                    user_agent=self.user_agent,
+                    spoof_browser=self.spoof_browser,
+                )
             await install_popup_protection(context, allow_popups=self.allow_popups)
 
             def schedule(response: Any) -> None:
@@ -336,6 +348,7 @@ def sniff_streams(
     auto_click: bool = True,
     user_data_dir: str | None = None,
     browser_channel: str | None = None,
+    spoof_browser: bool = False,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
@@ -346,6 +359,7 @@ def sniff_streams(
         auto_click=auto_click,
         user_data_dir=user_data_dir,
         browser_channel=browser_channel,
+        spoof_browser=spoof_browser,
     )
     return asyncio.run(sniffer.sniff(url))
 
@@ -363,6 +377,7 @@ class PlaywrightStreamSniffer:
         auto_click: bool = True,
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
+        spoof_browser: bool = False,
     ) -> list[StreamCandidate]:
         return sniff_streams(
             url,
@@ -374,4 +389,5 @@ class PlaywrightStreamSniffer:
             auto_click=auto_click,
             user_data_dir=user_data_dir,
             browser_channel=browser_channel,
+            spoof_browser=spoof_browser,
         )

@@ -24,6 +24,7 @@ async def _extract_links(
     proxy_settings: ProxySettings | None,
     user_data_dir: str | None,
     browser_channel: str | None,
+    spoof_browser: bool,
 ) -> list[LinkCandidate]:
     try:
         from playwright.async_api import async_playwright
@@ -43,19 +44,29 @@ async def _extract_links(
                     headless=headless,
                     proxy_url=proxy_url,
                     browser_channel=browser_channel,
+                    spoof_browser=spoof_browser,
                 ),
-                **desktop_context_options(user_agent=user_agent),
+                **desktop_context_options(
+                    user_agent=user_agent,
+                    spoof_browser=spoof_browser,
+                ),
             )
-            await harden_context(context)
+            if spoof_browser:
+                await harden_context(context)
         else:
             browser = await p.chromium.launch(
                 **browser_launch_options(
                     headless=headless,
                     proxy_url=proxy_url,
                     browser_channel=browser_channel,
+                    spoof_browser=spoof_browser,
                 )
             )
-            context = await new_desktop_context(browser, user_agent=user_agent)
+            context = await new_desktop_context(
+                browser,
+                user_agent=user_agent,
+                spoof_browser=spoof_browser,
+            )
         await install_popup_protection(context, allow_popups=allow_popups)
         page = (
             context.pages[0]
@@ -113,6 +124,7 @@ def extract_video_links(
     proxy_settings: ProxySettings | None = None,
     user_data_dir: str | None = None,
     browser_channel: str | None = None,
+    spoof_browser: bool = False,
 ) -> list[LinkCandidate]:
     return asyncio.run(
         _extract_links(
@@ -125,6 +137,7 @@ def extract_video_links(
             proxy_settings=proxy_settings,
             user_data_dir=user_data_dir,
             browser_channel=browser_channel,
+            spoof_browser=spoof_browser,
         )
     )
 
@@ -142,6 +155,7 @@ class PlaywrightLinkExtractor:
         proxy_settings: ProxySettings | None = None,
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
+        spoof_browser: bool = False,
     ) -> list[LinkCandidate]:
         return extract_video_links(
             url,
@@ -153,4 +167,5 @@ class PlaywrightLinkExtractor:
             proxy_settings=proxy_settings,
             user_data_dir=user_data_dir,
             browser_channel=browser_channel,
+            spoof_browser=spoof_browser,
         )

@@ -42,12 +42,13 @@ video-dl "https://example.com/watch/123" -l
 video-dl "https://example.com/watch/123" --headed -s 45
 ```
 
-헤드리스에서도 기본적으로 데스크톱 크롬 User-Agent, 한국어 locale, timezone, 일반 브라우저 헤더를 넣습니다. 특정 사이트가 그래도 차단하면 `--headed`로 확인하거나 `--user-agent`로 직접 값을 지정할 수 있습니다.
+기본 브라우저 컨텍스트는 최대한 단순하게 띄웁니다. 특정 사이트가 헤드리스/자동화 브라우저를 차단하는 것 같으면 `--headed`로 확인하거나, `--user-agent`로 직접 값을 지정할 수 있습니다.
 
-자동 클릭 때문에 페이지가 광고/빈 페이지로 튕기는 사이트는 수동 조작 모드로 실행할 수 있습니다. `--user-data-dir`를 쓰면 쿠키와 세션이 유지되고, `--browser-channel chrome`을 쓰면 설치된 Chrome 채널로 실행합니다.
+자동 클릭 때문에 페이지가 광고/빈 페이지로 튕기는 사이트는 수동 조작 모드로 실행할 수 있습니다. `--user-data-dir`를 쓰면 쿠키와 세션이 유지되고, `--browser-channel chrome`을 쓰면 설치된 Chrome 채널로 실행합니다. Chrome처럼 보이도록 User-Agent, locale, 헤더, 자동화 흔적 완화 설정까지 넣고 싶을 때만 `--spoof-browser`를 추가합니다.
 
 ```bash
 video-dl "https://example.com/watch/123" --headed --no-auto-click --user-data-dir ./chrome-profile --browser-channel chrome -s 120
+video-dl "https://example.com/watch/123" --headed --browser-channel chrome --spoof-browser -s 120
 ```
 
 재생 버튼 클릭 시 뜨는 악성 광고 팝업은 기본으로 닫고, 명확한 광고 네트워크 요청은 차단합니다. 새 탭에서 실제 영상이 열리는 경우를 위해 광고처럼 보이지 않는 새 탭은 유지하며, 스트림 감지는 열린 모든 탭에서 수행합니다. 영상 사이트가 정상 동작하는 데 팝업 차단이 방해될 때만 끌 수 있습니다.
@@ -220,6 +221,7 @@ video-dl -i sites.txt -j 3
 | `--no-auto-click` | 브라우저 스니핑 중 자동 재생 클릭 끄기 |
 | `--user-data-dir` | Chromium 프로필 디렉토리 유지 |
 | `--browser-channel` | `chrome`, `msedge` 같은 설치된 브라우저 채널 사용 |
+| `--spoof-browser` | Chrome-like UA/locale/header와 자동화 흔적 완화 적용 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |

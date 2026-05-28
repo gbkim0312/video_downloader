@@ -137,6 +137,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use an installed browser channel such as chrome or msedge.",
     )
     parser.add_argument(
+        "--spoof-browser",
+        action="store_true",
+        help=(
+            "Use Chrome-like UA, locale, headers, and light automation masking. "
+            "Off by default because some sites block or misroute spoofed contexts."
+        ),
+    )
+    parser.add_argument(
         "--allow-popups",
         action="store_true",
         help="Allow new tabs/popups. By default they are closed and known ad requests are blocked.",
@@ -232,6 +240,7 @@ def make_download_options(args: argparse.Namespace) -> DownloadOptions:
         auto_click=not args.no_auto_click,
         user_data_dir=args.user_data_dir,
         browser_channel=args.browser_channel,
+        spoof_browser=args.spoof_browser,
     )
 
 
@@ -361,6 +370,7 @@ def run_link_extraction(args: argparse.Namespace) -> int:
             proxy_settings=getattr(args, "proxy_settings", None),
             user_data_dir=args.user_data_dir,
             browser_channel=args.browser_channel,
+            spoof_browser=args.spoof_browser,
         ),
     )
     if args.links_output:

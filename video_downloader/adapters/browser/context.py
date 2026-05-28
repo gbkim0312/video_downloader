@@ -13,11 +13,11 @@ def browser_launch_options(
     headless: bool,
     proxy_url: str | None = None,
     browser_channel: str | None = None,
+    spoof_browser: bool = False,
 ) -> dict[str, Any]:
-    options: dict[str, Any] = {
-        "headless": headless,
-        "args": ["--disable-blink-features=AutomationControlled"],
-    }
+    options: dict[str, Any] = {"headless": headless}
+    if spoof_browser:
+        options["args"] = ["--disable-blink-features=AutomationControlled"]
     if proxy_url:
         options["proxy"] = {"server": proxy_url}
     if browser_channel:
@@ -29,31 +29,45 @@ def desktop_context_options(
     *,
     user_agent: str | None = None,
     browser: Any | None = None,
+    spoof_browser: bool = False,
 ) -> dict[str, Any]:
-    resolved_user_agent = user_agent or _desktop_chrome_user_agent(browser)
-    return {
-        "user_agent": resolved_user_agent,
-        "viewport": DEFAULT_VIEWPORT,
-        "locale": "ko-KR",
-        "timezone_id": DEFAULT_TIMEZONE,
-        "color_scheme": "light",
-        "device_scale_factor": 1,
-        "extra_http_headers": {
-            "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
-            "Upgrade-Insecure-Requests": "1",
-        },
-    }
+    options: dict[str, Any] = {"viewport": DEFAULT_VIEWPORT}
+    if user_agent:
+        options["user_agent"] = user_agent
+    elif spoof_browser:
+        options["user_agent"] = _desktop_chrome_user_agent(browser)
+
+    if spoof_browser:
+        options.update(
+            {
+                "locale": "ko-KR",
+                "timezone_id": DEFAULT_TIMEZONE,
+                "color_scheme": "light",
+                "device_scale_factor": 1,
+                "extra_http_headers": {
+                    "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+                    "Upgrade-Insecure-Requests": "1",
+                },
+            }
+        )
+    return options
 
 
 async def new_desktop_context(
     browser: Any,
     *,
     user_agent: str | None = None,
+    spoof_browser: bool = False,
 ) -> Any:
     context = await browser.new_context(
-        **desktop_context_options(user_agent=user_agent, browser=browser)
+        **desktop_context_options(
+            user_agent=user_agent,
+            browser=browser,
+            spoof_browser=spoof_browser,
+        )
     )
-    await harden_context(context)
+    if spoof_browser:
+        await harden_context(context)
     return context
 
 

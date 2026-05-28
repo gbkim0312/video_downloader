@@ -18,6 +18,7 @@ class StreamSnifferPort(Protocol):
         auto_click: bool = True,
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
+        spoof_browser: bool = False,
     ) -> list[StreamCandidate]:
         """Return playable media stream candidates observed from a browser page."""
 
@@ -35,5 +36,6 @@ class LinkExtractorPort(Protocol):
         proxy_settings: ProxySettings | None = None,
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
+        spoof_browser: bool = False,
     ) -> list[LinkCandidate]:
         """Return likely video page links observed in a browser page."""

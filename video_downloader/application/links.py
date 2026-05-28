@@ -18,6 +18,7 @@ class LinkExtractionOptions:
     proxy_settings: ProxySettings | None = None
     user_data_dir: str | None = None
     browser_channel: str | None = None
+    spoof_browser: bool = False
 
 
 class LinkExtractionService:
@@ -46,6 +47,7 @@ class LinkExtractionService:
             proxy_settings=options.proxy_settings,
             user_data_dir=options.user_data_dir,
             browser_channel=options.browser_channel,
+            spoof_browser=options.spoof_browser,
         )
 
     def append_links(self, output_path: str, links: list[LinkCandidate]) -> None:
