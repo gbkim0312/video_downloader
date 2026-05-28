@@ -14,6 +14,7 @@ from .adapters.downloader.ytdlp import (
 )
 from .adapters.progress.tqdm_progress import ProgressReporter
 from .adapters.progress.rich_dashboard import DashboardProgressReporter
+from .adapters.proxy.tor_control import TorController
 from .adapters.storage.proxy_info import DEFAULT_PROXY_INFO_PATH, read_proxy_info
 from .adapters.storage.text_url_store import TextUrlListStore
 from .application.downloads import (
@@ -187,7 +188,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def make_download_options(args: argparse.Namespace) -> DownloadOptions:
-    proxy_settings = read_proxy_info(args.proxy_info) if args.use_proxy else None
+    proxy_settings = getattr(args, "proxy_settings", None)
     return DownloadOptions(
         mode=args.mode,
         no_fallback=args.no_fallback,
@@ -220,6 +221,24 @@ def make_link_service() -> LinkExtractionService:
         extractor=PlaywrightLinkExtractor(),
         url_store=TextUrlListStore(),
     )
+
+
+def configure_proxy(args: argparse.Namespace) -> None:
+    args.proxy_settings = None
+    if not args.use_proxy:
+        return
+    settings = read_proxy_info(args.proxy_info)
+    try:
+        ip_address = TorController().current_ip(settings)
+    except Exception as exc:
+        if settings.kill_switch:
+            raise ValueError(
+                f"Proxy kill switch: cannot verify proxy connection ({exc})"
+            ) from exc
+        ip_address = f"unavailable ({exc})"
+    args.proxy_settings = settings
+    if not args.quiet:
+        print(f"proxy IP: {ip_address}")
 
 
 def result_to_exit_code(result: int | str) -> int:
@@ -292,6 +311,7 @@ def run_link_extraction(args: argparse.Namespace) -> int:
             wait_seconds=args.link_wait_seconds,
             allow_popups=args.allow_popups,
             quiet=args.quiet,
+            proxy_settings=getattr(args, "proxy_settings", None),
         ),
     )
     if args.links_output:
@@ -336,8 +356,6 @@ def run_batch(args: argparse.Namespace, output_template: str) -> int:
 def run_single(args: argparse.Namespace, output_template: str) -> int:
     service = make_download_service()
     options = make_download_options(args)
-    if options.proxy_settings and not options.quiet:
-        print(service.proxy_ip_message(options.proxy_settings))
     result, candidates = service.download(
         args.url,
         output_template,
@@ -365,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     Path(output_template).parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        configure_proxy(args)
         if args.extract_links:
             return run_link_extraction(args)
         if args.input_file:

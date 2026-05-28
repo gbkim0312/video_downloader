@@ -29,6 +29,10 @@ RESULT_FAILED = "failed"
 SUCCESS_RESULTS = {0, DOWNLOAD_DOWNLOADED, DOWNLOAD_SKIPPED}
 
 
+class ProxyUnavailableError(RuntimeError):
+    pass
+
+
 class NoStreamCandidatesError(RuntimeError):
     def __init__(self, url: str) -> None:
         super().__init__(f"no stream candidates found for {url}")
@@ -74,11 +78,17 @@ class DownloadService:
         self.tor_controller = tor_controller or TorController()
 
     def proxy_ip_message(self, settings: ProxySettings) -> str:
+        return f"proxy IP: {self.require_proxy_connection(settings)}"
+
+    def require_proxy_connection(self, settings: ProxySettings) -> str:
         try:
-            ip_address = self.tor_controller.current_ip(settings)
+            return self.tor_controller.current_ip(settings)
         except Exception as exc:
-            return f"proxy IP: unavailable ({exc})"
-        return f"proxy IP: {ip_address}"
+            if settings.kill_switch:
+                raise ProxyUnavailableError(
+                    f"Proxy kill switch: cannot verify proxy connection ({exc})"
+                ) from exc
+            return f"unavailable ({exc})"
 
     def select_candidates(
         self,
@@ -361,10 +371,11 @@ class DownloadService:
                     )
                 self.tor_controller.rotate_identity(settings)
                 if not options.quiet:
+                    ip_address = self.require_proxy_connection(settings)
                     self._message(
                         progress_reporter,
                         progress_label,
-                        self.proxy_ip_message(settings),
+                        f"proxy IP: {ip_address}",
                     )
 
         if last_error is not None:
@@ -407,11 +418,6 @@ class BatchDownloadService:
             total_jobs=len(urls),
             worker_slots=batch_options.parallel,
         )
-        if download_options.proxy_settings and not download_options.quiet:
-            reporter.message(
-                "batch",
-                self.download_service.proxy_ip_message(download_options.proxy_settings),
-            )
         jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
         failed_jobs = jobs
         completed: dict[int, str] = {}

@@ -20,3 +20,6 @@ TOR_ROTATE_ON_STATUS=403,429,500,502,503,504
 
 # URL used to show the current proxy exit IP in logs.
 PROXY_IP_CHECK_URL=https://api.ipify.org
+
+# Stop before any browser/download work if proxy IP cannot be verified.
+PROXY_KILL_SWITCH=true

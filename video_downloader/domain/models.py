@@ -75,3 +75,4 @@ class ProxySettings:
     rotation_retries: int = 1
     rotate_on_status: tuple[int, ...] = (403, 429, 500, 502, 503, 504)
     ip_check_url: str = "https://api.ipify.org"
+    kill_switch: bool = True

@@ -90,10 +90,12 @@ TOR_NEWNYM_DELAY=10
 TOR_ROTATION_RETRIES=1
 TOR_ROTATE_ON_STATUS=403,429,500,502,503,504
 PROXY_IP_CHECK_URL=https://api.ipify.org
+PROXY_KILL_SWITCH=true
 ```
 
 `TOR_CONTROL_PASSWORD`에는 `TOR_HashedControlPassword` 값이 아니라 ControlPort 인증에 쓰는 평문 비밀번호를 넣어야 합니다. 다운로드 중 403, 429, 5xx 계열 에러가 발생하면 Tor에 `SIGNAL NEWNYM`을 요청하고 `TOR_NEWNYM_DELAY`초 기다린 뒤 같은 다운로드를 다시 시도합니다.
 프록시를 쓰면 시작 시점의 현재 프록시 IP를 로그에 남기고, IP 변경 후에도 새 IP를 다시 확인합니다. IP 확인 주소는 `PROXY_IP_CHECK_URL`로 바꿀 수 있습니다.
+`PROXY_KILL_SWITCH=true`이면 프록시 IP 확인에 실패했을 때 브라우저나 다운로드를 시작하지 않고 즉시 종료합니다.
 병렬 다운로드 중 여러 작업이 동시에 차단되더라도 IP 변경 요청은 하나씩 순서대로 처리합니다.
 
 출력 디렉토리 지정:

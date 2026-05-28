@@ -4,7 +4,7 @@ import asyncio
 
 from .context import browser_launch_options, new_desktop_context
 from .protection import install_popup_protection, looks_like_ad_popup_url
-from video_downloader.domain.models import LinkCandidate
+from video_downloader.domain.models import LinkCandidate, ProxySettings
 from video_downloader.domain.scoring import dedupe_links, score_link
 
 
@@ -16,6 +16,7 @@ async def _extract_links(
     min_score: int,
     wait_seconds: float,
     allow_popups: bool,
+    proxy_settings: ProxySettings | None,
 ) -> list[LinkCandidate]:
     try:
         from playwright.async_api import async_playwright
@@ -26,7 +27,12 @@ async def _extract_links(
         ) from exc
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(**browser_launch_options(headless=headless))
+        browser = await p.chromium.launch(
+            **browser_launch_options(
+                headless=headless,
+                proxy_url=proxy_settings.proxy_url if proxy_settings else None,
+            )
+        )
         context = await new_desktop_context(browser, user_agent=user_agent)
         await install_popup_protection(context, allow_popups=allow_popups)
         page = await context.new_page()
@@ -77,6 +83,7 @@ def extract_video_links(
     min_score: int = 6,
     wait_seconds: float = 3,
     allow_popups: bool = False,
+    proxy_settings: ProxySettings | None = None,
 ) -> list[LinkCandidate]:
     return asyncio.run(
         _extract_links(
@@ -86,6 +93,7 @@ def extract_video_links(
             min_score=min_score,
             wait_seconds=wait_seconds,
             allow_popups=allow_popups,
+            proxy_settings=proxy_settings,
         )
     )
 
@@ -100,6 +108,7 @@ class PlaywrightLinkExtractor:
         min_score: int = 6,
         wait_seconds: float = 3,
         allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
     ) -> list[LinkCandidate]:
         return extract_video_links(
             url,
@@ -108,4 +117,5 @@ class PlaywrightLinkExtractor:
             min_score=min_score,
             wait_seconds=wait_seconds,
             allow_popups=allow_popups,
+            proxy_settings=proxy_settings,
         )

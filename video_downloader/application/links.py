@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from video_downloader.domain.models import LinkCandidate
+from video_downloader.domain.models import LinkCandidate, ProxySettings
 from video_downloader.ports.browser import LinkExtractorPort
 from video_downloader.ports.storage import UrlListStorePort
 
@@ -15,6 +15,7 @@ class LinkExtractionOptions:
     wait_seconds: float = 3
     allow_popups: bool = False
     quiet: bool = False
+    proxy_settings: ProxySettings | None = None
 
 
 class LinkExtractionService:
@@ -40,6 +41,7 @@ class LinkExtractionService:
             min_score=options.min_score,
             wait_seconds=options.wait_seconds,
             allow_popups=options.allow_popups,
+            proxy_settings=options.proxy_settings,
         )
 
     def append_links(self, output_path: str, links: list[LinkCandidate]) -> None:

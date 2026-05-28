@@ -29,5 +29,6 @@ class LinkExtractorPort(Protocol):
         min_score: int = 6,
         wait_seconds: float = 3,
         allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
     ) -> list[LinkCandidate]:
         """Return likely video page links observed in a browser page."""
