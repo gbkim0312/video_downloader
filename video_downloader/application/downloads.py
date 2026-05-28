@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 from pathlib import Path
 import time
@@ -507,11 +507,10 @@ class BatchDownloadService:
             raise ValueError("--retries must be at least 0.")
 
         pipeline_sniff = download_options.mode in {"auto", "browser"}
-        worker_slots = batch_options.parallel * (2 if pipeline_sniff else 1)
         reporter = self.progress_factory(
             enabled=not download_options.quiet,
             total_jobs=len(urls),
-            worker_slots=worker_slots,
+            worker_slots=batch_options.parallel,
         )
         jobs = [BatchJob(index=index, url=url) for index, url in enumerate(urls, start=1)]
         failed_jobs = jobs
@@ -533,28 +532,11 @@ class BatchDownloadService:
                         ),
                     )
 
-                if pipeline_sniff:
-                    results = self._run_pipeline_attempt(
-                        current_jobs,
-                        total_jobs=len(urls),
-                        attempt=attempt,
-                        output_template=output_template,
-                        download_options=download_options,
-                        batch_options=batch_options,
-                        reporter=reporter,
-                    )
-                else:
-                    results = self._run_direct_attempt(
-                        current_jobs,
-                        total_jobs=len(urls),
-                        attempt=attempt,
-                        output_template=output_template,
-                        download_options=download_options,
-                        batch_options=batch_options,
-                        reporter=reporter,
-                    )
-
-                for job, label, result in results:
+                def handle_result(
+                    job: BatchJob,
+                    label: str,
+                    result: int | str,
+                ) -> None:
                     if result in SUCCESS_RESULTS:
                         completed[job.index] = str(result)
                         if result == DOWNLOAD_SKIPPED:
@@ -565,7 +547,7 @@ class BatchDownloadService:
                             status = "downloaded"
                         reporter.message(label, status)
                         reporter.complete_job(label)
-                        continue
+                        return
 
                     reporter.close_bar(label)
                     if attempt <= batch_options.retries:
@@ -574,6 +556,29 @@ class BatchDownloadService:
                     else:
                         reporter.message(label, f"failed after retries url={job.url}")
                         reporter.complete_job(label)
+
+                if pipeline_sniff:
+                    self._run_pipeline_attempt(
+                        current_jobs,
+                        total_jobs=len(urls),
+                        attempt=attempt,
+                        output_template=output_template,
+                        download_options=download_options,
+                        batch_options=batch_options,
+                        reporter=reporter,
+                        on_result=handle_result,
+                    )
+                else:
+                    self._run_direct_attempt(
+                        current_jobs,
+                        total_jobs=len(urls),
+                        attempt=attempt,
+                        output_template=output_template,
+                        download_options=download_options,
+                        batch_options=batch_options,
+                        reporter=reporter,
+                        on_result=handle_result,
+                    )
         except KeyboardInterrupt:
             interrupted = True
             reporter.message("batch", "interrupted; stopping after current cleanup")
@@ -612,8 +617,8 @@ class BatchDownloadService:
         download_options: DownloadOptions,
         batch_options: BatchOptions,
         reporter: ProgressReporterPort,
-    ) -> list[tuple[BatchJob, str, int | str]]:
-        results: list[tuple[BatchJob, str, int | str]] = []
+        on_result,
+    ) -> None:
         sniff_executor = ThreadPoolExecutor(max_workers=batch_options.parallel)
         download_executor = ThreadPoolExecutor(max_workers=batch_options.parallel)
         sniff_futures: dict[Future[list[StreamCandidate]], tuple[BatchJob, str]] = {}
@@ -631,35 +636,38 @@ class BatchDownloadService:
                     )
                 ] = (job, label)
 
-            for future in as_completed(sniff_futures):
-                job, label = sniff_futures[future]
-                try:
-                    candidates = future.result()
-                except Exception as exc:
-                    reporter.message(label, f"sniff failed: {exc} url={job.url}")
-                    results.append((job, label, RESULT_FAILED))
-                    continue
-                download_futures[
-                    download_executor.submit(
-                        self._process_prefetched,
-                        job.url,
-                        candidates,
-                        output_template,
-                        download_options,
-                        reporter,
-                        label,
-                    )
-                ] = (job, label)
+            while sniff_futures or download_futures:
+                pending: set[Future] = set(sniff_futures) | set(download_futures)
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    if future in sniff_futures:
+                        job, label = sniff_futures.pop(future)
+                        try:
+                            candidates = future.result()
+                        except Exception as exc:
+                            reporter.message(label, f"sniff failed: {exc} url={job.url}")
+                            on_result(job, label, RESULT_FAILED)
+                            continue
+                        download_futures[
+                            download_executor.submit(
+                                self._process_prefetched,
+                                job.url,
+                                candidates,
+                                output_template,
+                                download_options,
+                                reporter,
+                                label,
+                            )
+                        ] = (job, label)
+                        continue
 
-            for future in as_completed(download_futures):
-                job, label = download_futures[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    reporter.message(label, f"failed: {exc} url={job.url}")
-                    result = RESULT_FAILED
-                results.append((job, label, result))
-            return results
+                    job, label = download_futures.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        reporter.message(label, f"failed: {exc} url={job.url}")
+                        result = RESULT_FAILED
+                    on_result(job, label, result)
         finally:
             sniff_executor.shutdown(wait=False, cancel_futures=True)
             download_executor.shutdown(wait=False, cancel_futures=True)
@@ -674,8 +682,8 @@ class BatchDownloadService:
         download_options: DownloadOptions,
         batch_options: BatchOptions,
         reporter: ProgressReporterPort,
-    ) -> list[tuple[BatchJob, str, int | str]]:
-        results: list[tuple[BatchJob, str, int | str]] = []
+        on_result,
+    ) -> None:
         executor = ThreadPoolExecutor(max_workers=batch_options.parallel)
         futures: dict[Future[int | str], tuple[BatchJob, str]] = {}
         try:
@@ -699,8 +707,7 @@ class BatchDownloadService:
                 except Exception as exc:
                     reporter.message(label, f"failed: {exc} url={job.url}")
                     result = RESULT_FAILED
-                results.append((job, label, result))
-            return results
+                on_result(job, label, result)
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 

@@ -116,8 +116,7 @@ class DashboardProgressReporter:
             self._jobs.pop(label, None)
             position = self._positions.pop(label, None)
             if position is not None:
-                self._free_positions.append(position)
-                self._free_positions.sort()
+                self._release_position(position)
             self._last_updated.pop(label, None)
             self._refresh()
 
@@ -172,6 +171,23 @@ class DashboardProgressReporter:
         if self._free_positions:
             return self._free_positions.pop(0)
         return max(self._positions.values(), default=0) + 1
+
+    def _release_position(self, position: int) -> None:
+        waiting = sorted(
+            (
+                (waiting_position, label)
+                for label, waiting_position in self._positions.items()
+                if waiting_position > self.worker_slots
+            ),
+            key=lambda item: item[0],
+        )
+        if position <= self.worker_slots and waiting:
+            _, label = waiting[0]
+            self._positions[label] = position
+            return
+        if position <= self.worker_slots:
+            self._free_positions.append(position)
+            self._free_positions.sort()
 
     def _state_from_message(self, text: str) -> str | None:
         compact = " ".join(text.split())
