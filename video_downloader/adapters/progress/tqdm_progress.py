@@ -37,9 +37,11 @@ class ProgressReporter:
         min_interval: float = 0.2,
         total_jobs: int = 0,
         worker_slots: int = 0,
+        show_status_messages: bool = False,
     ) -> None:
         self.enabled = enabled
         self.min_interval = min_interval
+        self.show_status_messages = show_status_messages
         self._lock = threading.RLock()
         self._last_updated: dict[str, float] = {}
         self._bars: dict[str, Any] = {}
@@ -93,6 +95,18 @@ class ProgressReporter:
             message = self._deferred_message(label, text)
             if message:
                 self._deferred_messages.append(message)
+                return
+            if self.show_status_messages:
+                self._write_status(text)
+
+    def _write_status(self, text: str) -> None:
+        compact = self._compact(text, limit=180)
+        if not compact or compact in {"done", "downloaded", "skipped"}:
+            return
+        if self._bars:
+            self._load_tqdm().write(compact, file=sys.stdout)
+            return
+        print(compact)
 
     def _set_postfix(self, bar: Any, text: str, *, refresh: bool = False) -> None:
         bar.postfix = text
