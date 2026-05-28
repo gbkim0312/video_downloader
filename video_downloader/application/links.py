@@ -19,6 +19,7 @@ class LinkExtractionOptions:
     user_data_dir: str | None = None
     browser_channel: str | None = None
     spoof_browser: bool = False
+    block_devtool_detectors: bool = False
 
 
 class LinkExtractionService:
@@ -48,6 +49,7 @@ class LinkExtractionService:
             user_data_dir=options.user_data_dir,
             browser_channel=options.browser_channel,
             spoof_browser=options.spoof_browser,
+            block_devtool_detectors=options.block_devtool_detectors,
         )
 
     def append_links(self, output_path: str, links: list[LinkCandidate]) -> None:

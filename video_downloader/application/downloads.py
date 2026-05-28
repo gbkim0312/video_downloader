@@ -63,6 +63,8 @@ class DownloadOptions:
     browser_channel: str | None = None
     spoof_browser: bool = False
     restore_blank: bool = True
+    block_devtool_detectors: bool = False
+    browser_debug_log: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +187,8 @@ class DownloadService:
             browser_channel=options.browser_channel,
             spoof_browser=options.spoof_browser,
             restore_blank=options.restore_blank,
+            block_devtool_detectors=options.block_devtool_detectors,
+            debug_log_path=options.browser_debug_log,
         )
 
         if not options.quiet:

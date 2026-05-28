@@ -150,6 +150,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not re-open the original URL when the page navigates to about:blank.",
     )
     parser.add_argument(
+        "--browser-debug-log",
+        default=None,
+        help="Write browser navigation, close, failed request, and stream events to JSONL.",
+    )
+    parser.add_argument(
+        "--block-devtool-detectors",
+        action="store_true",
+        help="Block known anti-devtools scripts such as disable-devtool.",
+    )
+    parser.add_argument(
         "--allow-popups",
         action="store_true",
         help="Allow new tabs/popups. By default they are closed and known ad requests are blocked.",
@@ -247,6 +257,8 @@ def make_download_options(args: argparse.Namespace) -> DownloadOptions:
         browser_channel=args.browser_channel,
         spoof_browser=args.spoof_browser,
         restore_blank=not args.no_blank_restore,
+        block_devtool_detectors=args.block_devtool_detectors,
+        browser_debug_log=args.browser_debug_log,
     )
 
 
@@ -377,6 +389,7 @@ def run_link_extraction(args: argparse.Namespace) -> int:
             user_data_dir=args.user_data_dir,
             browser_channel=args.browser_channel,
             spoof_browser=args.spoof_browser,
+            block_devtool_detectors=args.block_devtool_detectors,
         ),
     )
     if args.links_output:

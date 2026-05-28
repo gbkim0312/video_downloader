@@ -57,6 +57,18 @@ video-dl "https://example.com/watch/123" --headed --browser-channel chrome --spo
 video-dl "https://example.com/watch/123" --headed --no-auto-click --no-blank-restore -s 120
 ```
 
+그래도 빈 페이지로 이동하는 원인이 불분명하면 브라우저 진단 로그를 남깁니다. JSONL 파일에는 페이지 이동, 새 탭/닫힘, 실패한 요청, 차단된 광고 요청, 감지된 스트림 후보가 시간순으로 기록됩니다.
+
+```bash
+video-dl "https://example.com/watch/123" -l --headed --no-auto-click --no-blank-restore --browser-debug-log debug.jsonl -s 120
+```
+
+권한 있는 페이지에서 `disable-devtool` 같은 anti-devtools 스크립트 때문에 `about:blank`로 튕기는 경우, 해당 감지 스크립트 요청만 차단할 수 있습니다.
+
+```bash
+video-dl "https://example.com/watch/123" -l --headed --no-auto-click --no-blank-restore --block-devtool-detectors -s 120
+```
+
 재생 버튼 클릭 시 뜨는 악성 광고 팝업은 기본으로 닫고, 명확한 광고 네트워크 요청은 차단합니다. 새 탭에서 실제 영상이 열리는 경우를 위해 광고처럼 보이지 않는 새 탭은 유지하며, 스트림 감지는 열린 모든 탭에서 수행합니다. 영상 사이트가 정상 동작하는 데 팝업 차단이 방해될 때만 끌 수 있습니다.
 
 ```bash
@@ -229,6 +241,8 @@ video-dl -i sites.txt -j 3
 | `--browser-channel` | `chrome`, `msedge` 같은 설치된 브라우저 채널 사용 |
 | `--spoof-browser` | Chrome-like UA/locale/header와 자동화 흔적 완화 적용 |
 | `--no-blank-restore` | `about:blank` 자동 복구 끄기 |
+| `--browser-debug-log` | 브라우저 이동/닫힘/요청 실패/스트림 감지 이벤트를 JSONL로 저장 |
+| `--block-devtool-detectors` | `disable-devtool` 같은 anti-devtools 스크립트 요청 차단 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |

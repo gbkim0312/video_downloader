@@ -14,6 +14,7 @@ from .context import (
     harden_context,
     new_desktop_context,
 )
+from .debug import BrowserDebugLog
 from .protection import install_popup_protection
 from video_downloader.domain.models import ProxySettings, StreamCandidate
 from video_downloader.domain.scoring import content_score
@@ -129,6 +130,8 @@ class BrowserStreamSniffer:
         browser_channel: str | None = None,
         spoof_browser: bool = False,
         restore_blank: bool = True,
+        block_devtool_detectors: bool = False,
+        debug_log_path: str | None = None,
     ) -> None:
         self.headless = headless
         self.user_agent = user_agent
@@ -140,6 +143,10 @@ class BrowserStreamSniffer:
         self.browser_channel = browser_channel
         self.spoof_browser = spoof_browser
         self.restore_blank = restore_blank
+        self.block_devtool_detectors = block_devtool_detectors
+        self.debug_log_path = debug_log_path
+        self.debug_log = BrowserDebugLog(debug_log_path) if debug_log_path else None
+        self._debug_attached_pages: set[int] = set()
 
     async def sniff(self, url: str) -> list[StreamCandidate]:
         try:
@@ -188,7 +195,12 @@ class BrowserStreamSniffer:
                     user_agent=self.user_agent,
                     spoof_browser=self.spoof_browser,
                 )
-            await install_popup_protection(context, allow_popups=self.allow_popups)
+            await install_popup_protection(
+                context,
+                allow_popups=self.allow_popups,
+                block_devtool_detectors=self.block_devtool_detectors,
+                debug_log=self.debug_log,
+            )
 
             def schedule(response: Any) -> None:
                 task = asyncio.create_task(
@@ -201,6 +213,7 @@ class BrowserStreamSniffer:
                 if page not in observed_pages:
                     observed_pages.append(page)
                 page.on("response", schedule)
+                self._attach_debug(page)
 
             context.on("page", attach_page)
             page = (
@@ -244,10 +257,83 @@ class BrowserStreamSniffer:
                 continue
         return ""
 
+    def _attach_debug(self, page: Any) -> None:
+        if not self.debug_log:
+            return
+        page_id = id(page)
+        if page_id in self._debug_attached_pages:
+            return
+        self._debug_attached_pages.add(page_id)
+        self.debug_log.event(
+            "page_attached",
+            page_id=page_id,
+            url=getattr(page, "url", ""),
+        )
+
+        async def log_navigation(frame: Any) -> None:
+            try:
+                if frame == page.main_frame:
+                    self.debug_log.event(
+                        "main_frame_navigated",
+                        page_id=page_id,
+                        url=frame.url,
+                    )
+            except Exception as exc:
+                self.debug_log.event(
+                    "debug_listener_error",
+                    page_id=page_id,
+                    error=exc,
+                )
+
+        def on_console(message: Any) -> None:
+            try:
+                self.debug_log.event(
+                    "console",
+                    page_id=page_id,
+                    type=message.type,
+                    text=message.text,
+                )
+            except Exception:
+                pass
+
+        def on_page_error(error: Any) -> None:
+            self.debug_log.event("page_error", page_id=page_id, error=error)
+
+        def on_request_failed(request: Any) -> None:
+            try:
+                failure = request.failure or {}
+                self.debug_log.event(
+                    "request_failed",
+                    page_id=page_id,
+                    url=request.url,
+                    resource_type=request.resource_type,
+                    error=failure.get("errorText", ""),
+                )
+            except Exception:
+                pass
+
+        page.on(
+            "framenavigated",
+            lambda frame: asyncio.create_task(log_navigation(frame)),
+        )
+        page.on("console", on_console)
+        page.on("pageerror", on_page_error)
+        page.on("requestfailed", on_request_failed)
+        page.on(
+            "close",
+            lambda: self.debug_log.event("page_closed", page_id=page_id),
+        )
+
     async def _open_and_play(self, page: Any, url: str) -> None:
         try:
+            if self.debug_log:
+                self.debug_log.event("goto_start", url=url)
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            if self.debug_log:
+                self.debug_log.event("goto_done", url=page.url)
         except Exception:
+            if self.debug_log:
+                self.debug_log.event("goto_failed", url=url)
             return
         await asyncio.sleep(1.5)
         await self._restore_blank_page(page, url)
@@ -290,9 +376,15 @@ class BrowserStreamSniffer:
         if not self.headless:
             return
         try:
+            if self.debug_log:
+                self.debug_log.event("blank_restore_start", url=url)
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(1000)
+            if self.debug_log:
+                self.debug_log.event("blank_restore_done", url=page.url)
         except Exception:
+            if self.debug_log:
+                self.debug_log.event("blank_restore_failed", url=url)
             pass
 
     async def _handle_response(
@@ -305,6 +397,13 @@ class BrowserStreamSniffer:
         content_type = headers.get("content-type", "")
         if not looks_like_stream(response.url, content_type):
             return
+        if self.debug_log:
+            self.debug_log.event(
+                "stream_candidate_seen",
+                url=response.url,
+                content_type=content_type,
+                status=response.status,
+            )
 
         request = response.request
         if request.resource_type == "image":
@@ -354,6 +453,8 @@ def sniff_streams(
     browser_channel: str | None = None,
     spoof_browser: bool = False,
     restore_blank: bool = True,
+    block_devtool_detectors: bool = False,
+    debug_log_path: str | None = None,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
@@ -366,6 +467,8 @@ def sniff_streams(
         browser_channel=browser_channel,
         spoof_browser=spoof_browser,
         restore_blank=restore_blank,
+        block_devtool_detectors=block_devtool_detectors,
+        debug_log_path=debug_log_path,
     )
     return asyncio.run(sniffer.sniff(url))
 
@@ -385,6 +488,8 @@ class PlaywrightStreamSniffer:
         browser_channel: str | None = None,
         spoof_browser: bool = False,
         restore_blank: bool = True,
+        block_devtool_detectors: bool = False,
+        debug_log_path: str | None = None,
     ) -> list[StreamCandidate]:
         return sniff_streams(
             url,
@@ -398,4 +503,6 @@ class PlaywrightStreamSniffer:
             browser_channel=browser_channel,
             spoof_browser=spoof_browser,
             restore_blank=restore_blank,
+            block_devtool_detectors=block_devtool_detectors,
+            debug_log_path=debug_log_path,
         )

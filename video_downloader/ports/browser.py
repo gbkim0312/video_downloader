@@ -20,6 +20,8 @@ class StreamSnifferPort(Protocol):
         browser_channel: str | None = None,
         spoof_browser: bool = False,
         restore_blank: bool = True,
+        block_devtool_detectors: bool = False,
+        debug_log_path: str | None = None,
     ) -> list[StreamCandidate]:
         """Return playable media stream candidates observed from a browser page."""
 
@@ -38,5 +40,6 @@ class LinkExtractorPort(Protocol):
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
         spoof_browser: bool = False,
+        block_devtool_detectors: bool = False,
     ) -> list[LinkCandidate]:
         """Return likely video page links observed in a browser page."""

@@ -25,6 +25,7 @@ async def _extract_links(
     user_data_dir: str | None,
     browser_channel: str | None,
     spoof_browser: bool,
+    block_devtool_detectors: bool,
 ) -> list[LinkCandidate]:
     try:
         from playwright.async_api import async_playwright
@@ -67,7 +68,11 @@ async def _extract_links(
                 user_agent=user_agent,
                 spoof_browser=spoof_browser,
             )
-        await install_popup_protection(context, allow_popups=allow_popups)
+        await install_popup_protection(
+            context,
+            allow_popups=allow_popups,
+            block_devtool_detectors=block_devtool_detectors,
+        )
         page = (
             context.pages[0]
             if user_data_dir and context.pages
@@ -125,6 +130,7 @@ def extract_video_links(
     user_data_dir: str | None = None,
     browser_channel: str | None = None,
     spoof_browser: bool = False,
+    block_devtool_detectors: bool = False,
 ) -> list[LinkCandidate]:
     return asyncio.run(
         _extract_links(
@@ -138,6 +144,7 @@ def extract_video_links(
             user_data_dir=user_data_dir,
             browser_channel=browser_channel,
             spoof_browser=spoof_browser,
+            block_devtool_detectors=block_devtool_detectors,
         )
     )
 
@@ -156,6 +163,7 @@ class PlaywrightLinkExtractor:
         user_data_dir: str | None = None,
         browser_channel: str | None = None,
         spoof_browser: bool = False,
+        block_devtool_detectors: bool = False,
     ) -> list[LinkCandidate]:
         return extract_video_links(
             url,
@@ -168,4 +176,5 @@ class PlaywrightLinkExtractor:
             user_data_dir=user_data_dir,
             browser_channel=browser_channel,
             spoof_browser=spoof_browser,
+            block_devtool_detectors=block_devtool_detectors,
         )
