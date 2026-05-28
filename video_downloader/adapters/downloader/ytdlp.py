@@ -86,6 +86,18 @@ class YtDlpDownloader:
             if progress_hook:
                 progress_hook(progress_label or url, status)
 
+        if progress_hook:
+            progress_hook(
+                progress_label or url,
+                {
+                    "status": "downloading",
+                    "downloaded_bytes": 0,
+                    "total_bytes": None,
+                    "total_bytes_estimate": None,
+                    "speed": None,
+                },
+            )
+
         options = {
             "outtmpl": output_template,
             "format": "bestvideo+bestaudio/best",
