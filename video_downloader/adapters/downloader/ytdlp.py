@@ -95,6 +95,7 @@ class YtDlpDownloader:
             "no_warnings": quiet,
             "retries": 8,
             "fragment_retries": 8,
+            "hls_prefer_native": False,
             "concurrent_fragment_downloads": fragment_parallel,
             "progress_hooks": [handle_progress],
             "external_downloader_args": {

@@ -14,6 +14,7 @@ python -m playwright install chromium
 ```
 
 `yt-dlp`가 HLS/DASH 병합에 `ffmpeg`를 사용할 수 있으므로, 시스템에 `ffmpeg`가 있으면 결과가 더 안정적입니다.
+암호화된 HLS 스트림은 `ffmpeg` 경로를 우선 사용하며, 일부 native HLS 처리에 필요한 `pycryptodomex`도 함께 설치됩니다.
 
 ## 사용법
 
