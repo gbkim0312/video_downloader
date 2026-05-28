@@ -10,7 +10,16 @@ from video_downloader.adapters.downloader.ytdlp import (
     YtDlpDownloader,
     default_output_template,
 )
-from video_downloader.domain.models import BatchJob, BatchSummary, StreamCandidate
+from video_downloader.adapters.proxy.tor_control import (
+    TorController,
+    should_rotate_proxy,
+)
+from video_downloader.domain.models import (
+    BatchJob,
+    BatchSummary,
+    ProxySettings,
+    StreamCandidate,
+)
 from video_downloader.domain.scoring import is_likely_ad, is_short_duration_only_ad
 from video_downloader.ports.browser import StreamSnifferPort
 from video_downloader.ports.progress import ProgressReporterPort
@@ -43,6 +52,7 @@ class DownloadOptions:
     output_dir: str = "downloads"
     output_template: str | None = None
     fragment_parallel: int = 4
+    proxy_settings: ProxySettings | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,9 +67,11 @@ class DownloadService:
         *,
         sniffer: StreamSnifferPort,
         downloader: YtDlpDownloader,
+        tor_controller: TorController | None = None,
     ) -> None:
         self.sniffer = sniffer
         self.downloader = downloader
+        self.tor_controller = tor_controller or TorController()
 
     def select_candidates(
         self,
@@ -113,6 +125,7 @@ class DownloadService:
             user_agent=options.user_agent,
             play_seconds=options.play_seconds,
             allow_popups=options.allow_popups,
+            proxy_settings=options.proxy_settings,
         )
 
         if not options.quiet:
@@ -166,13 +179,21 @@ class DownloadService:
                     )
 
             try:
-                result = self.downloader.download_candidate(
-                    selected,
-                    output_template=selected_output,
-                    quiet=options.quiet or progress_reporter is not None,
-                    progress_hook=progress_reporter.hook if progress_reporter else None,
+                result = self._download_with_proxy_rotation(
+                    lambda: self.downloader.download_candidate(
+                        selected,
+                        output_template=selected_output,
+                        quiet=options.quiet or progress_reporter is not None,
+                        progress_hook=(
+                            progress_reporter.hook if progress_reporter else None
+                        ),
+                        progress_label=progress_label,
+                        fragment_parallel=options.fragment_parallel,
+                        proxy_settings=options.proxy_settings,
+                    ),
+                    options=options,
+                    progress_reporter=progress_reporter,
                     progress_label=progress_label,
-                    fragment_parallel=options.fragment_parallel,
                 )
                 return result, candidates
             except Exception as exc:
@@ -201,13 +222,19 @@ class DownloadService:
         progress_reporter: ProgressReporterPort | None,
         progress_label: str,
     ) -> str:
-        return self.downloader.download_url(
-            url,
-            output_template=output_template,
-            quiet=options.quiet or progress_reporter is not None,
-            progress_hook=progress_reporter.hook if progress_reporter else None,
+        return self._download_with_proxy_rotation(
+            lambda: self.downloader.download_url(
+                url,
+                output_template=output_template,
+                quiet=options.quiet or progress_reporter is not None,
+                progress_hook=progress_reporter.hook if progress_reporter else None,
+                progress_label=progress_label,
+                fragment_parallel=options.fragment_parallel,
+                proxy_settings=options.proxy_settings,
+            ),
+            options=options,
+            progress_reporter=progress_reporter,
             progress_label=progress_label,
-            fragment_parallel=options.fragment_parallel,
         )
 
     def auto_download(
@@ -297,6 +324,39 @@ class DownloadService:
             progress_reporter.message(label, text)
         else:
             print(text)
+
+    def _download_with_proxy_rotation(
+        self,
+        download,
+        *,
+        options: DownloadOptions,
+        progress_reporter: ProgressReporterPort | None,
+        progress_label: str,
+    ) -> str:
+        settings = options.proxy_settings
+        attempts = (settings.rotation_retries + 1) if settings else 1
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return download()
+            except Exception as exc:
+                last_error = exc
+                if not should_rotate_proxy(exc, settings) or attempt >= attempts:
+                    raise
+                if not options.quiet:
+                    self._message(
+                        progress_reporter,
+                        progress_label,
+                        (
+                            "proxy blocked/rate-limited; requesting new Tor identity "
+                            f"({attempt}/{settings.rotation_retries})"
+                        ),
+                    )
+                self.tor_controller.rotate_identity(settings)
+
+        if last_error is not None:
+            raise last_error
+        return RESULT_FAILED
 
 
 class BatchDownloadService:

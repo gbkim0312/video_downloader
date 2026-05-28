@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from video_downloader.domain.models import LinkCandidate, StreamCandidate
+from video_downloader.domain.models import LinkCandidate, ProxySettings, StreamCandidate
 
 
 class StreamSnifferPort(Protocol):
@@ -14,6 +14,7 @@ class StreamSnifferPort(Protocol):
         user_agent: str | None = None,
         play_seconds: float = 25,
         allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
     ) -> list[StreamCandidate]:
         """Return playable media stream candidates observed from a browser page."""
 

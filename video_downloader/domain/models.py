@@ -63,3 +63,14 @@ class BatchSummary:
     failed: int
     total: int
     failed_jobs: tuple[BatchJob, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProxySettings:
+    proxy_url: str
+    control_host: str = "127.0.0.1"
+    control_port: int = 9051
+    control_password: str | None = None
+    newnym_delay: float = 10
+    rotation_retries: int = 1
+    rotate_on_status: tuple[int, ...] = (403, 429, 500, 502, 503, 504)

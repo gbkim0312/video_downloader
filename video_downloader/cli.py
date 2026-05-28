@@ -14,6 +14,7 @@ from .adapters.downloader.ytdlp import (
 )
 from .adapters.progress.tqdm_progress import ProgressReporter
 from .adapters.progress.rich_dashboard import DashboardProgressReporter
+from .adapters.storage.proxy_info import DEFAULT_PROXY_INFO_PATH, read_proxy_info
 from .adapters.storage.text_url_store import TextUrlListStore
 from .application.downloads import (
     BatchDownloadService,
@@ -87,6 +88,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-fallback",
         action="store_true",
         help="In auto mode, do not fall back to yt-dlp when browser sniff finds no streams.",
+    )
+    parser.add_argument(
+        "-p",
+        "--use-proxy",
+        action="store_true",
+        help="Use proxy settings from .proxyinfo for browser sniffing and downloads.",
+    )
+    parser.add_argument(
+        "--proxy-info",
+        default=DEFAULT_PROXY_INFO_PATH,
+        help="Proxy config file used with --use-proxy. Default: .proxyinfo.",
     )
     parser.add_argument(
         "-s",
@@ -175,6 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def make_download_options(args: argparse.Namespace) -> DownloadOptions:
+    proxy_settings = read_proxy_info(args.proxy_info) if args.use_proxy else None
     return DownloadOptions(
         mode=args.mode,
         no_fallback=args.no_fallback,
@@ -191,6 +204,7 @@ def make_download_options(args: argparse.Namespace) -> DownloadOptions:
         output_dir=args.output_dir,
         output_template=args.output_template,
         fragment_parallel=args.fragment_parallel,
+        proxy_settings=proxy_settings,
     )
 
 
@@ -352,6 +366,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.input_file:
             return run_batch(args, output_template)
         return run_single(args, output_template)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         print("Interrupted by user.", file=sys.stderr)
         return 130

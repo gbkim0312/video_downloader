@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from video_downloader.domain.models import StreamCandidate
+from video_downloader.domain.models import ProxySettings, StreamCandidate
 
 
 ProgressHook = Callable[[str, dict[str, Any]], None]
@@ -37,6 +37,7 @@ class YtDlpDownloader:
         progress_hook: ProgressHook | None = None,
         progress_label: str = "",
         fragment_parallel: int = 4,
+        proxy_settings: ProxySettings | None = None,
     ) -> str:
         try:
             from yt_dlp import YoutubeDL
@@ -68,6 +69,8 @@ class YtDlpDownloader:
         }
         if headers:
             options["http_headers"] = headers
+        if proxy_settings:
+            options["proxy"] = proxy_settings.proxy_url
 
         with YoutubeDL(options) as ydl:
             ydl.download([url])
@@ -82,6 +85,7 @@ class YtDlpDownloader:
         progress_hook: ProgressHook | None = None,
         progress_label: str = "",
         fragment_parallel: int = 4,
+        proxy_settings: ProxySettings | None = None,
     ) -> str:
         headers = {}
         if candidate.user_agent:
@@ -96,4 +100,5 @@ class YtDlpDownloader:
             progress_hook=progress_hook,
             progress_label=progress_label,
             fragment_parallel=fragment_parallel,
+            proxy_settings=proxy_settings,
         )

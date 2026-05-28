@@ -67,6 +67,30 @@ video-dl "https://example.com/watch/123" -m ytdlp
 video-dl "https://example.com/watch/123" --no-fallback
 ```
 
+Tor/SOCKS 프록시를 통해 브라우저 감지와 다운로드를 실행하려면 `.proxyinfo`를 만들고 `-p`, `--use-proxy`를 붙입니다.
+
+```bash
+cp .proxyinfo.example .proxyinfo
+video-dl "https://example.com/watch/123" -p
+video-dl -i sites.txt -j 3 -p
+```
+
+기본 `.proxyinfo` 예시는 로컬 Tor 프록시 `socks5://127.0.0.1:9050`과 ControlPort `127.0.0.1:9051`을 사용합니다.
+Docker에서 Tor를 띄운다면 9050은 SOCKS 프록시, 9051은 IP 변경 요청용 ControlPort로 열면 됩니다.
+
+```text
+PROXY_URL=socks5://127.0.0.1:9050
+TOR_CONTROL_HOST=127.0.0.1
+TOR_CONTROL_PORT=9051
+TOR_CONTROL_PASSWORD=plain-control-password
+TOR_NEWNYM_DELAY=10
+TOR_ROTATION_RETRIES=1
+TOR_ROTATE_ON_STATUS=403,429,500,502,503,504
+```
+
+`TOR_CONTROL_PASSWORD`에는 `TOR_HashedControlPassword` 값이 아니라 ControlPort 인증에 쓰는 평문 비밀번호를 넣어야 합니다. 다운로드 중 403, 429, 5xx 계열 에러가 발생하면 Tor에 `SIGNAL NEWNYM`을 요청하고 `TOR_NEWNYM_DELAY`초 기다린 뒤 같은 다운로드를 다시 시도합니다.
+병렬 다운로드 중 여러 작업이 동시에 차단되더라도 IP 변경 요청은 하나씩 순서대로 처리합니다.
+
 출력 디렉토리 지정:
 
 ```bash
@@ -167,6 +191,8 @@ video-dl -i sites.txt -j 3
 | `-c`, `--candidate` | 다운로드할 후보 번호 |
 | `-m`, `--mode` | `auto`, `browser`, `ytdlp` 중 선택 |
 | `--no-fallback` | 브라우저 감지 실패 시 `yt-dlp` fallback 끄기 |
+| `-p`, `--use-proxy` | `.proxyinfo` 프록시 설정 사용 |
+| `--proxy-info` | 프록시 설정 파일 경로. 기본값 `.proxyinfo` |
 | `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-q`, `--quiet` | 출력 줄이기 |

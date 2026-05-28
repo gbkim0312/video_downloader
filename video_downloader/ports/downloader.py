@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol
 
-from video_downloader.domain.models import StreamCandidate
+from video_downloader.domain.models import ProxySettings, StreamCandidate
 
 ProgressHook = Callable[[str, dict[str, Any]], None]
 
@@ -18,6 +18,7 @@ class MediaDownloaderPort(Protocol):
         progress_hook: ProgressHook | None = None,
         progress_label: str = "",
         fragment_parallel: int = 4,
+        proxy_settings: ProxySettings | None = None,
     ) -> str:
         """Download a URL and return a result status."""
 
@@ -30,5 +31,6 @@ class MediaDownloaderPort(Protocol):
         progress_hook: ProgressHook | None = None,
         progress_label: str = "",
         fragment_parallel: int = 4,
+        proxy_settings: ProxySettings | None = None,
     ) -> str:
         """Download a selected stream candidate and return a result status."""

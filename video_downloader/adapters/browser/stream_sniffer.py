@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .protection import install_popup_protection
-from video_downloader.domain.models import StreamCandidate
+from video_downloader.domain.models import ProxySettings, StreamCandidate
 from video_downloader.domain.scoring import content_score
 
 
@@ -103,11 +103,13 @@ class BrowserStreamSniffer:
         user_agent: str | None = None,
         play_seconds: float = 25,
         allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
     ) -> None:
         self.headless = headless
         self.user_agent = user_agent
         self.play_seconds = play_seconds
         self.allow_popups = allow_popups
+        self.proxy_settings = proxy_settings
 
     async def sniff(self, url: str) -> list[StreamCandidate]:
         try:
@@ -123,7 +125,10 @@ class BrowserStreamSniffer:
         pending: set[asyncio.Task[None]] = set()
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=self.headless)
+            launch_options: dict[str, Any] = {"headless": self.headless}
+            if self.proxy_settings:
+                launch_options["proxy"] = {"server": self.proxy_settings.proxy_url}
+            browser = await p.chromium.launch(**launch_options)
             context = await browser.new_context(
                 user_agent=self.user_agent,
                 viewport={"width": 1365, "height": 900},
@@ -244,12 +249,14 @@ def sniff_streams(
     user_agent: str | None = None,
     play_seconds: float = 25,
     allow_popups: bool = False,
+    proxy_settings: ProxySettings | None = None,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
         user_agent=user_agent,
         play_seconds=play_seconds,
         allow_popups=allow_popups,
+        proxy_settings=proxy_settings,
     )
     return asyncio.run(sniffer.sniff(url))
 
@@ -263,6 +270,7 @@ class PlaywrightStreamSniffer:
         user_agent: str | None = None,
         play_seconds: float = 25,
         allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
     ) -> list[StreamCandidate]:
         return sniff_streams(
             url,
@@ -270,4 +278,5 @@ class PlaywrightStreamSniffer:
             user_agent=user_agent,
             play_seconds=play_seconds,
             allow_popups=allow_popups,
+            proxy_settings=proxy_settings,
         )

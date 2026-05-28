@@ -1,0 +1,19 @@
+# Proxy endpoint used by Playwright and yt-dlp.
+PROXY_URL=socks5://127.0.0.1:9050
+
+# Tor ControlPort used for SIGNAL NEWNYM when 403/429/5xx errors happen.
+TOR_CONTROL_HOST=127.0.0.1
+TOR_CONTROL_PORT=9051
+
+# Use the plain control password here, not TOR_HashedControlPassword.
+# Leave empty only if your Tor ControlPort allows unauthenticated AUTHENTICATE.
+TOR_CONTROL_PASSWORD=
+
+# Delay after NEWNYM before retrying the same download.
+TOR_NEWNYM_DELAY=10
+
+# Number of proxy rotations inside one download attempt.
+TOR_ROTATION_RETRIES=1
+
+# HTTP statuses that trigger proxy rotation.
+TOR_ROTATE_ON_STATUS=403,429,500,502,503,504
