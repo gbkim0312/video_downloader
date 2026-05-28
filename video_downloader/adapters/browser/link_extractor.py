@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from .context import browser_launch_options, new_desktop_context
+from .context import (
+    browser_launch_options,
+    desktop_context_options,
+    harden_context,
+    new_desktop_context,
+)
 from .protection import install_popup_protection, looks_like_ad_popup_url
 from video_downloader.domain.models import LinkCandidate, ProxySettings
 from video_downloader.domain.scoring import dedupe_links, score_link
@@ -17,6 +22,8 @@ async def _extract_links(
     wait_seconds: float,
     allow_popups: bool,
     proxy_settings: ProxySettings | None,
+    user_data_dir: str | None,
+    browser_channel: str | None,
 ) -> list[LinkCandidate]:
     try:
         from playwright.async_api import async_playwright
@@ -27,15 +34,34 @@ async def _extract_links(
         ) from exc
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            **browser_launch_options(
-                headless=headless,
-                proxy_url=proxy_settings.proxy_url if proxy_settings else None,
+        proxy_url = proxy_settings.proxy_url if proxy_settings else None
+        browser = None
+        if user_data_dir:
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir,
+                **browser_launch_options(
+                    headless=headless,
+                    proxy_url=proxy_url,
+                    browser_channel=browser_channel,
+                ),
+                **desktop_context_options(user_agent=user_agent),
             )
-        )
-        context = await new_desktop_context(browser, user_agent=user_agent)
+            await harden_context(context)
+        else:
+            browser = await p.chromium.launch(
+                **browser_launch_options(
+                    headless=headless,
+                    proxy_url=proxy_url,
+                    browser_channel=browser_channel,
+                )
+            )
+            context = await new_desktop_context(browser, user_agent=user_agent)
         await install_popup_protection(context, allow_popups=allow_popups)
-        page = await context.new_page()
+        page = (
+            context.pages[0]
+            if user_data_dir and context.pages
+            else await context.new_page()
+        )
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(int(wait_seconds * 1000))
@@ -53,7 +79,8 @@ async def _extract_links(
             )
         finally:
             await context.close()
-            await browser.close()
+            if browser is not None:
+                await browser.close()
 
     candidates = []
     for row in rows:
@@ -84,6 +111,8 @@ def extract_video_links(
     wait_seconds: float = 3,
     allow_popups: bool = False,
     proxy_settings: ProxySettings | None = None,
+    user_data_dir: str | None = None,
+    browser_channel: str | None = None,
 ) -> list[LinkCandidate]:
     return asyncio.run(
         _extract_links(
@@ -94,6 +123,8 @@ def extract_video_links(
             wait_seconds=wait_seconds,
             allow_popups=allow_popups,
             proxy_settings=proxy_settings,
+            user_data_dir=user_data_dir,
+            browser_channel=browser_channel,
         )
     )
 
@@ -109,6 +140,8 @@ class PlaywrightLinkExtractor:
         wait_seconds: float = 3,
         allow_popups: bool = False,
         proxy_settings: ProxySettings | None = None,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
     ) -> list[LinkCandidate]:
         return extract_video_links(
             url,
@@ -118,4 +151,6 @@ class PlaywrightLinkExtractor:
             wait_seconds=wait_seconds,
             allow_popups=allow_popups,
             proxy_settings=proxy_settings,
+            user_data_dir=user_data_dir,
+            browser_channel=browser_channel,
         )

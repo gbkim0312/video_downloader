@@ -8,14 +8,41 @@ DEFAULT_TIMEZONE = "Asia/Seoul"
 DEFAULT_VIEWPORT = {"width": 1365, "height": 900}
 
 
-def browser_launch_options(*, headless: bool, proxy_url: str | None = None) -> dict[str, Any]:
+def browser_launch_options(
+    *,
+    headless: bool,
+    proxy_url: str | None = None,
+    browser_channel: str | None = None,
+) -> dict[str, Any]:
     options: dict[str, Any] = {
         "headless": headless,
         "args": ["--disable-blink-features=AutomationControlled"],
     }
     if proxy_url:
         options["proxy"] = {"server": proxy_url}
+    if browser_channel:
+        options["channel"] = browser_channel
     return options
+
+
+def desktop_context_options(
+    *,
+    user_agent: str | None = None,
+    browser: Any | None = None,
+) -> dict[str, Any]:
+    resolved_user_agent = user_agent or _desktop_chrome_user_agent(browser)
+    return {
+        "user_agent": resolved_user_agent,
+        "viewport": DEFAULT_VIEWPORT,
+        "locale": "ko-KR",
+        "timezone_id": DEFAULT_TIMEZONE,
+        "color_scheme": "light",
+        "device_scale_factor": 1,
+        "extra_http_headers": {
+            "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+            "Upgrade-Insecure-Requests": "1",
+        },
+    }
 
 
 async def new_desktop_context(
@@ -23,19 +50,14 @@ async def new_desktop_context(
     *,
     user_agent: str | None = None,
 ) -> Any:
-    resolved_user_agent = user_agent or _desktop_chrome_user_agent(browser)
     context = await browser.new_context(
-        user_agent=resolved_user_agent,
-        viewport=DEFAULT_VIEWPORT,
-        locale="ko-KR",
-        timezone_id=DEFAULT_TIMEZONE,
-        color_scheme="light",
-        device_scale_factor=1,
-        extra_http_headers={
-            "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
-            "Upgrade-Insecure-Requests": "1",
-        },
+        **desktop_context_options(user_agent=user_agent, browser=browser)
     )
+    await harden_context(context)
+    return context
+
+
+async def harden_context(context: Any) -> None:
     await context.add_init_script(
         """
         Object.defineProperty(navigator, 'webdriver', {
@@ -49,11 +71,10 @@ async def new_desktop_context(
         });
         """
     )
-    return context
 
 
-def _desktop_chrome_user_agent(browser: Any) -> str:
-    version = getattr(browser, "version", "")
+def _desktop_chrome_user_agent(browser: Any | None) -> str:
+    version = getattr(browser, "version", "") if browser is not None else ""
     if callable(version):
         version = version()
     major_version = str(version).split(".", 1)[0]

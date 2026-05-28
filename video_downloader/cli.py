@@ -122,6 +122,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show Chromium. Useful for pages that need login, consent, or manual play.",
     )
     parser.add_argument(
+        "--no-auto-click",
+        action="store_true",
+        help="Do not automatically click play/video elements during browser sniffing.",
+    )
+    parser.add_argument(
+        "--user-data-dir",
+        default=None,
+        help="Use a persistent Chromium profile directory.",
+    )
+    parser.add_argument(
+        "--browser-channel",
+        default=None,
+        help="Use an installed browser channel such as chrome or msedge.",
+    )
+    parser.add_argument(
         "--allow-popups",
         action="store_true",
         help="Allow new tabs/popups. By default they are closed and known ad requests are blocked.",
@@ -214,6 +229,9 @@ def make_download_options(args: argparse.Namespace) -> DownloadOptions:
         output_template=args.output_template,
         fragment_parallel=args.fragment_parallel,
         proxy_settings=proxy_settings,
+        auto_click=not args.no_auto_click,
+        user_data_dir=args.user_data_dir,
+        browser_channel=args.browser_channel,
     )
 
 
@@ -341,6 +359,8 @@ def run_link_extraction(args: argparse.Namespace) -> int:
             allow_popups=args.allow_popups,
             quiet=args.quiet,
             proxy_settings=getattr(args, "proxy_settings", None),
+            user_data_dir=args.user_data_dir,
+            browser_channel=args.browser_channel,
         ),
     )
     if args.links_output:

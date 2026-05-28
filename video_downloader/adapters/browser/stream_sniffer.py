@@ -8,7 +8,12 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
 
-from .context import browser_launch_options, new_desktop_context
+from .context import (
+    browser_launch_options,
+    desktop_context_options,
+    harden_context,
+    new_desktop_context,
+)
 from .protection import install_popup_protection
 from video_downloader.domain.models import ProxySettings, StreamCandidate
 from video_downloader.domain.scoring import content_score
@@ -119,12 +124,18 @@ class BrowserStreamSniffer:
         play_seconds: float = 25,
         allow_popups: bool = False,
         proxy_settings: ProxySettings | None = None,
+        auto_click: bool = True,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
     ) -> None:
         self.headless = headless
         self.user_agent = user_agent
         self.play_seconds = play_seconds
         self.allow_popups = allow_popups
         self.proxy_settings = proxy_settings
+        self.auto_click = auto_click
+        self.user_data_dir = user_data_dir
+        self.browser_channel = browser_channel
 
     async def sniff(self, url: str) -> list[StreamCandidate]:
         try:
@@ -140,15 +151,28 @@ class BrowserStreamSniffer:
         pending: set[asyncio.Task[None]] = set()
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                **browser_launch_options(
-                    headless=self.headless,
-                    proxy_url=(
-                        self.proxy_settings.proxy_url if self.proxy_settings else None
+            proxy_url = self.proxy_settings.proxy_url if self.proxy_settings else None
+            browser = None
+            if self.user_data_dir:
+                context = await p.chromium.launch_persistent_context(
+                    self.user_data_dir,
+                    **browser_launch_options(
+                        headless=self.headless,
+                        proxy_url=proxy_url,
+                        browser_channel=self.browser_channel,
                     ),
+                    **desktop_context_options(user_agent=self.user_agent),
                 )
-            )
-            context = await new_desktop_context(browser, user_agent=self.user_agent)
+                await harden_context(context)
+            else:
+                browser = await p.chromium.launch(
+                    **browser_launch_options(
+                        headless=self.headless,
+                        proxy_url=proxy_url,
+                        browser_channel=self.browser_channel,
+                    )
+                )
+                context = await new_desktop_context(browser, user_agent=self.user_agent)
             await install_popup_protection(context, allow_popups=self.allow_popups)
 
             def schedule(response: Any) -> None:
@@ -162,7 +186,11 @@ class BrowserStreamSniffer:
                 page.on("response", schedule)
 
             context.on("page", attach_page)
-            page = await context.new_page()
+            page = (
+                context.pages[0]
+                if self.user_data_dir and context.pages
+                else await context.new_page()
+            )
             attach_page(page)
             await self._open_and_play(page, url)
             await page.wait_for_timeout(int(self.play_seconds * 1000))
@@ -191,6 +219,8 @@ class BrowserStreamSniffer:
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(1500)
         await self._restore_blank_page(page, url)
+        if not self.auto_click:
+            return
 
         selectors = [
             'button[aria-label*="Play" i]',
@@ -272,9 +302,8 @@ class BrowserStreamSniffer:
         candidates.append(candidate)
 
     async def _close(self, context: Any, browser: Any) -> None:
-        try:
-            await context.close()
-        finally:
+        await context.close()
+        if browser is not None:
             await browser.close()
 
 
@@ -286,6 +315,9 @@ def sniff_streams(
     play_seconds: float = 25,
     allow_popups: bool = False,
     proxy_settings: ProxySettings | None = None,
+    auto_click: bool = True,
+    user_data_dir: str | None = None,
+    browser_channel: str | None = None,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
@@ -293,6 +325,9 @@ def sniff_streams(
         play_seconds=play_seconds,
         allow_popups=allow_popups,
         proxy_settings=proxy_settings,
+        auto_click=auto_click,
+        user_data_dir=user_data_dir,
+        browser_channel=browser_channel,
     )
     return asyncio.run(sniffer.sniff(url))
 
@@ -307,6 +342,9 @@ class PlaywrightStreamSniffer:
         play_seconds: float = 25,
         allow_popups: bool = False,
         proxy_settings: ProxySettings | None = None,
+        auto_click: bool = True,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
     ) -> list[StreamCandidate]:
         return sniff_streams(
             url,
@@ -315,4 +353,7 @@ class PlaywrightStreamSniffer:
             play_seconds=play_seconds,
             allow_popups=allow_popups,
             proxy_settings=proxy_settings,
+            auto_click=auto_click,
+            user_data_dir=user_data_dir,
+            browser_channel=browser_channel,
         )

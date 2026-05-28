@@ -58,6 +58,9 @@ class DownloadOptions:
     output_template: str | None = None
     fragment_parallel: int = 4
     proxy_settings: ProxySettings | None = None
+    auto_click: bool = True
+    user_data_dir: str | None = None
+    browser_channel: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +178,9 @@ class DownloadService:
             play_seconds=options.play_seconds,
             allow_popups=options.allow_popups,
             proxy_settings=options.proxy_settings,
+            auto_click=options.auto_click,
+            user_data_dir=options.user_data_dir,
+            browser_channel=options.browser_channel,
         )
 
         if not options.quiet:

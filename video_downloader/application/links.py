@@ -16,6 +16,8 @@ class LinkExtractionOptions:
     allow_popups: bool = False
     quiet: bool = False
     proxy_settings: ProxySettings | None = None
+    user_data_dir: str | None = None
+    browser_channel: str | None = None
 
 
 class LinkExtractionService:
@@ -42,6 +44,8 @@ class LinkExtractionService:
             wait_seconds=options.wait_seconds,
             allow_popups=options.allow_popups,
             proxy_settings=options.proxy_settings,
+            user_data_dir=options.user_data_dir,
+            browser_channel=options.browser_channel,
         )
 
     def append_links(self, output_path: str, links: list[LinkCandidate]) -> None:

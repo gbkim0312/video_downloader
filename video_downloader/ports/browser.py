@@ -15,6 +15,9 @@ class StreamSnifferPort(Protocol):
         play_seconds: float = 25,
         allow_popups: bool = False,
         proxy_settings: ProxySettings | None = None,
+        auto_click: bool = True,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
     ) -> list[StreamCandidate]:
         """Return playable media stream candidates observed from a browser page."""
 
@@ -30,5 +33,7 @@ class LinkExtractorPort(Protocol):
         wait_seconds: float = 3,
         allow_popups: bool = False,
         proxy_settings: ProxySettings | None = None,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
     ) -> list[LinkCandidate]:
         """Return likely video page links observed in a browser page."""
