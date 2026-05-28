@@ -438,6 +438,7 @@ def run_single(args: argparse.Namespace, output_template: str) -> int:
         enabled=not options.quiet,
         worker_slots=1,
         show_status_messages=True,
+        leave_bars=True,
     )
     try:
         result, candidates = service.download(
