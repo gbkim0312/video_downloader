@@ -66,6 +66,12 @@ class YtDlpDownloader:
             "fragment_retries": 8,
             "concurrent_fragment_downloads": fragment_parallel,
             "progress_hooks": [handle_progress],
+            "external_downloader_args": {
+                "ffmpeg_i": ["-hide_banner", "-loglevel", "error"],
+            },
+            "postprocessor_args": {
+                "ffmpeg": ["-hide_banner", "-loglevel", "error"],
+            },
         }
         if headers:
             options["http_headers"] = headers
