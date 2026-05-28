@@ -190,6 +190,7 @@ class BrowserStreamSniffer:
     async def _open_and_play(self, page: Any, url: str) -> None:
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(1500)
+        await self._restore_blank_page(page, url)
 
         selectors = [
             'button[aria-label*="Play" i]',
@@ -203,17 +204,30 @@ class BrowserStreamSniffer:
                 if await element.count():
                     await element.click(timeout=1500, force=True)
                     await page.wait_for_timeout(1000)
+                    await self._restore_blank_page(page, url)
             except Exception:
                 pass
 
-        try:
-            await page.keyboard.press("Space")
-        except Exception:
-            pass
+        if self.headless:
+            try:
+                await page.keyboard.press("Space")
+                await self._restore_blank_page(page, url)
+            except Exception:
+                pass
 
+            try:
+                box = page.viewport_size or {"width": 1365, "height": 900}
+                await page.mouse.click(box["width"] / 2, box["height"] / 2)
+                await self._restore_blank_page(page, url)
+            except Exception:
+                pass
+
+    async def _restore_blank_page(self, page: Any, url: str) -> None:
+        if page.url != "about:blank":
+            return
         try:
-            box = page.viewport_size or {"width": 1365, "height": 900}
-            await page.mouse.click(box["width"] / 2, box["height"] / 2)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(1000)
         except Exception:
             pass
 
