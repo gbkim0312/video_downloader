@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 
@@ -65,11 +65,13 @@ class DownloadOptions:
     restore_blank: bool = True
     block_devtool_detectors: bool = False
     browser_debug_log: str | None = None
+    filename_prefix: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class BatchOptions:
     parallel: int = 1
+    sniff_parallel: int | None = None
     retries: int = 3
 
 
@@ -242,9 +244,12 @@ class DownloadService:
 
             selected_output = output_template
             if options.output_template is None and selected.page_title:
+                title = selected.page_title
+                if options.filename_prefix:
+                    title = f"{options.filename_prefix} - {title}"
                 selected_output = default_output_template(
                     options.output_dir,
-                    selected.page_title,
+                    title,
                 )
                 Path(selected_output).parent.mkdir(parents=True, exist_ok=True)
                 if not options.quiet:
@@ -338,10 +343,16 @@ class DownloadService:
         progress_reporter: ProgressReporterPort | None,
         progress_label: str,
     ) -> str:
+        selected_output = output_template
+        if options.output_template is None and options.filename_prefix:
+            selected_output = str(
+                Path(options.output_dir)
+                / f"{options.filename_prefix} - %(title).200B.%(ext)s"
+            )
         return self._download_with_proxy_rotation(
             lambda: self.downloader.download_url(
                 url,
-                output_template=output_template,
+                output_template=selected_output,
                 quiet=options.quiet or progress_reporter is not None,
                 progress_hook=progress_reporter.hook if progress_reporter else None,
                 progress_label=progress_label,
@@ -507,6 +518,8 @@ class BatchDownloadService:
             raise ValueError(f"No URLs found in {input_file}.")
         if batch_options.parallel < 1:
             raise ValueError("--parallel must be at least 1.")
+        if batch_options.sniff_parallel is not None and batch_options.sniff_parallel < 1:
+            raise ValueError("--sniff-parallel must be at least 1.")
         if download_options.fragment_parallel < 1:
             raise ValueError("--fragment-parallel must be at least 1.")
         if batch_options.retries < 0:
@@ -625,7 +638,8 @@ class BatchDownloadService:
         reporter: ProgressReporterPort,
         on_result,
     ) -> None:
-        sniff_executor = ThreadPoolExecutor(max_workers=batch_options.parallel)
+        sniff_workers = batch_options.sniff_parallel or batch_options.parallel
+        sniff_executor = ThreadPoolExecutor(max_workers=sniff_workers)
         download_executor = ThreadPoolExecutor(max_workers=batch_options.parallel)
         sniff_futures: dict[Future[list[StreamCandidate]], tuple[BatchJob, str]] = {}
         download_futures: dict[Future[int | str], tuple[BatchJob, str]] = {}
@@ -660,7 +674,11 @@ class BatchDownloadService:
                                 job.url,
                                 candidates,
                                 output_template,
-                                download_options,
+                                self._job_options(
+                                    download_options,
+                                    job,
+                                    total_jobs,
+                                ),
                                 reporter,
                                 label,
                             )
@@ -700,7 +718,7 @@ class BatchDownloadService:
                         self._process_one,
                         job.url,
                         output_template,
-                        download_options,
+                        self._job_options(download_options, job, total_jobs),
                         reporter,
                         label,
                     )
@@ -738,6 +756,15 @@ class BatchDownloadService:
         except Exception as exc:
             reporter.message(label, f"failed: {exc} url={url}")
             return RESULT_FAILED
+
+    def _job_options(
+        self,
+        options: DownloadOptions,
+        job: BatchJob,
+        total_jobs: int,
+    ) -> DownloadOptions:
+        width = max(2, len(str(total_jobs)))
+        return replace(options, filename_prefix=f"{job.index:0{width}d}")
 
     def _process_sniff(
         self,

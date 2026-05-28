@@ -168,6 +168,12 @@ video-dl -i sites.txt -j 3
 
 배치 `auto`/`browser` 모드는 스니핑 큐와 다운로드 큐를 분리합니다. `-j 3`이면 최대 3개는 미리 스니핑하고, 동시에 최대 3개는 다운로드할 수 있어 긴 다운로드 중에도 다음 URL의 스트림 후보를 미리 잡아둡니다.
 
+같은 사이트를 여러 브라우저가 동시에 열 때 차단/리다이렉트가 흔들리면 다운로드 병렬 수는 유지하고 스니핑 동시 실행 수만 낮출 수 있습니다.
+
+```bash
+video-dl -i sites.txt -j 5 --sniff-parallel 1
+```
+
 배치 모드는 기본적으로 `htop`처럼 터미널 전체 화면에서 고정된 표 형태로 진행률을 표시합니다. 예전처럼 일반 tqdm 진행바를 쓰려면 `--no-dashboard`를 붙이면 됩니다.
 
 ```bash
@@ -225,6 +231,7 @@ video-dl -i sites.txt -j 3
 | `-o`, `--output-dir` | 다운로드 저장 디렉토리 |
 | `-i`, `--input-file` | 한 줄에 하나씩 URL이 있는 파일 |
 | `-j`, `--parallel` | 배치 다운로드 동시 실행 수 |
+| `--sniff-parallel` | 배치에서 브라우저 스니핑 동시 실행 수 |
 | `-F`, `--fragment-parallel` | HLS/DASH 조각 동시 다운로드 수 |
 | `-r`, `--retries` | 실패 URL 재시도 횟수 |
 | `--dashboard` | 배치 진행률을 전체 화면 표 형태로 표시. 기본값 |

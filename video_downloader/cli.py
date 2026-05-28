@@ -56,6 +56,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of URLs to process at the same time when using --input-file.",
     )
     parser.add_argument(
+        "--sniff-parallel",
+        type=int,
+        default=None,
+        help=(
+            "Maximum concurrent browser sniffing jobs in batch mode. "
+            "Defaults to --parallel. Use 1 for sites that throttle parallel browsers."
+        ),
+    )
+    parser.add_argument(
         "-F",
         "--fragment-parallel",
         type=int,
@@ -417,7 +426,11 @@ def run_batch(args: argparse.Namespace, output_template: str) -> int:
             args.input_file,
             output_template,
             download_options=make_download_options(args),
-            batch_options=BatchOptions(parallel=args.parallel, retries=args.retries),
+            batch_options=BatchOptions(
+                parallel=args.parallel,
+                sniff_parallel=args.sniff_parallel,
+                retries=args.retries,
+            ),
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
