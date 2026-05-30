@@ -18,5 +18,5 @@ downloads/
 *.webm
 *.mov
 *.m4v
-
+*.site
 .DS_Store
