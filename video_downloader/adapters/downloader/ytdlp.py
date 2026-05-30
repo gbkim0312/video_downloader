@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urljoin, urlparse
@@ -88,6 +90,127 @@ def is_file_input(url: str) -> bool:
     return Path(url).exists()
 
 
+def _output_template_to_glob(output_template: str) -> str:
+    placeholder_pattern = re.compile(r"%\([^)]+\)(?:[.#0 +\-]?\d*)?[A-Za-z]")
+    return placeholder_pattern.sub("*", output_template)
+
+
+def _can_monitor_output_template(output_template: str) -> bool:
+    placeholder_names = re.findall(r"%\(([^)]+)\)", output_template)
+    return all(name == "ext" for name in placeholder_names)
+
+
+class FileSizeProgressMonitor:
+    def __init__(
+        self,
+        *,
+        output_template: str,
+        progress_label: str,
+        progress_hook: ProgressHook,
+        on_growth: Callable[[], None],
+        interval: float = 0.5,
+    ) -> None:
+        self.output_template = output_template
+        self.progress_label = progress_label
+        self.progress_hook = progress_hook
+        self.on_growth = on_growth
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_size = 0
+        self._last_time = 0.0
+
+    def start(self) -> None:
+        self._last_size = self._current_size() or 0
+        self._last_time = time.monotonic()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        self._emit_progress()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            self._emit_progress()
+
+    def _emit_progress(self) -> None:
+        size = self._current_size()
+        if size is None or size <= 0:
+            return
+
+        now = time.monotonic()
+        elapsed = now - self._last_time if self._last_time else 0
+        delta = size - self._last_size
+        speed = delta / elapsed if delta > 0 and elapsed > 0 else None
+        if delta > 0:
+            self.on_growth()
+        if delta == 0 and self._last_size:
+            return
+
+        self._last_size = size
+        self._last_time = now
+        self.progress_hook(
+            self.progress_label,
+            {
+                "status": "downloading",
+                "downloaded_bytes": size,
+                "total_bytes": None,
+                "total_bytes_estimate": None,
+                "speed": speed,
+            },
+        )
+
+    def _current_size(self) -> int | None:
+        files = self._matching_files()
+        if not files:
+            return None
+
+        aggregate_files = [
+            path
+            for path in files
+            if ".part-Frag" not in path.name and not path.name.endswith(".ytdl")
+        ]
+        if aggregate_files:
+            sizes = [self._safe_size(path) for path in aggregate_files]
+            return max((size for size in sizes if size is not None), default=None)
+
+        fragment_files = [path for path in files if ".part-Frag" in path.name]
+        if fragment_files:
+            sizes = [self._safe_size(path) for path in fragment_files]
+            return sum(size for size in sizes if size is not None)
+        return None
+
+    def _safe_size(self, path: Path) -> int | None:
+        try:
+            return path.stat().st_size
+        except OSError:
+            return None
+
+    def _matching_files(self) -> list[Path]:
+        pattern = _output_template_to_glob(self.output_template)
+        path_pattern = Path(pattern)
+        parent = path_pattern.parent
+        name_pattern = path_pattern.name
+        if not str(parent):
+            parent = Path(".")
+        if not parent.exists():
+            return []
+
+        if any(char in name_pattern for char in "*?["):
+            paths = list(parent.glob(name_pattern))
+        else:
+            paths = [path_pattern]
+
+        return [
+            path
+            for path in paths
+            if path.exists() and path.is_file() and not path.name.endswith(".json")
+        ]
+
+
 class YtDlpDownloader:
     def download_url(
         self,
@@ -109,6 +232,7 @@ class YtDlpDownloader:
             ) from exc
 
         saw_download_activity = False
+        saw_file_growth = False
 
         def handle_progress(status: dict[str, Any]) -> None:
             nonlocal saw_download_activity
@@ -116,6 +240,10 @@ class YtDlpDownloader:
                 saw_download_activity = True
             if progress_hook:
                 progress_hook(progress_label or url, status)
+
+        def mark_file_growth() -> None:
+            nonlocal saw_file_growth
+            saw_file_growth = True
 
         if progress_hook:
             progress_hook(
@@ -155,9 +283,23 @@ class YtDlpDownloader:
         if proxy_settings:
             options["proxy"] = proxy_settings.proxy_url
 
+        monitor = None
+        if progress_hook and _can_monitor_output_template(output_template):
+            monitor = FileSizeProgressMonitor(
+                output_template=output_template,
+                progress_label=progress_label or url,
+                progress_hook=progress_hook,
+                on_growth=mark_file_growth,
+            )
+            monitor.start()
+
         with YoutubeDL(options) as ydl:
-            ydl.download([url])
-        return DOWNLOAD_DOWNLOADED if saw_download_activity else DOWNLOAD_SKIPPED
+            try:
+                ydl.download([url])
+            finally:
+                if monitor is not None:
+                    monitor.stop()
+        return DOWNLOAD_DOWNLOADED if saw_download_activity or saw_file_growth else DOWNLOAD_SKIPPED
 
     def download_candidate(
         self,
