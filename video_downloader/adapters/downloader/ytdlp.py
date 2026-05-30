@@ -57,6 +57,22 @@ def headers_for_candidate(candidate: StreamCandidate) -> dict[str, str]:
     return headers
 
 
+def ffmpeg_input_args(headers: dict[str, str] | None) -> list[str]:
+    args = ["-hide_banner", "-loglevel", "error"]
+    if not headers:
+        return args
+
+    header_lines = []
+    for name, value in headers.items():
+        clean_name = name.replace("\r", "").replace("\n", "")
+        clean_value = value.replace("\r", "").replace("\n", "")
+        if clean_name and clean_value:
+            header_lines.append(f"{clean_name}: {clean_value}\r\n")
+    if header_lines:
+        args.extend(["-headers", "".join(header_lines)])
+    return args
+
+
 def _canonical_header_name(name: str) -> str:
     return "-".join(part.capitalize() for part in name.split("-"))
 
@@ -270,7 +286,7 @@ class YtDlpDownloader:
             "concurrent_fragment_downloads": fragment_parallel,
             "progress_hooks": [handle_progress],
             "external_downloader_args": {
-                "ffmpeg_i": ["-hide_banner", "-loglevel", "error"],
+                "ffmpeg_i": ffmpeg_input_args(headers),
             },
             "postprocessor_args": {
                 "ffmpeg": ["-hide_banner", "-loglevel", "error"],
