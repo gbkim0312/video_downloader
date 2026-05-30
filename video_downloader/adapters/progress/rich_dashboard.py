@@ -195,6 +195,8 @@ class DashboardProgressReporter:
             return "sniffing"
         if compact.startswith("Found "):
             return "selecting"
+        if compact == "queued for download":
+            return "queued"
         if compact.startswith("no browser streams found"):
             return "fallback"
         if compact.startswith("candidate "):
@@ -215,6 +217,7 @@ class DashboardProgressReporter:
             "Opening page with ",
             "Found ",
             "Using page title for filename:",
+            "queued for download",
         )
         if compact.startswith(quiet_prefixes):
             return None

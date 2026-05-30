@@ -178,6 +178,7 @@ class ProgressReporter:
             "Opening page with ",
             "Found ",
             "Using page title for filename:",
+            "queued for download",
         )
         if compact.startswith(quiet_prefixes):
             return None

@@ -674,6 +674,7 @@ class BatchDownloadService:
                             reporter.message(label, f"sniff failed: {exc} url={job.url}")
                             on_result(job, label, RESULT_FAILED)
                             continue
+                        reporter.message(label, "queued for download")
                         download_futures[
                             download_executor.submit(
                                 self._process_prefetched,
