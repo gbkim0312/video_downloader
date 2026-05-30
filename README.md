@@ -195,7 +195,7 @@ video-dl -i sites.txt -j 3
 같은 사이트를 여러 브라우저가 동시에 열 때 차단/리다이렉트가 흔들리면 다운로드 병렬 수는 유지하고 스니핑 동시 실행 수만 낮출 수 있습니다.
 
 ```bash
-video-dl -i sites.txt -j 5 --sniff-parallel 1
+video-dl -i sites.txt -j 5 -S 1
 ```
 
 후후티비 같은 사이트를 여러 개 받을 때는 브라우저 스니핑을 하나씩만 수행하고, `yt-dlp` fallback을 피하기 위해 `--mode browser`를 같이 쓰는 것을 권장합니다. 에피소드 제목이 같아 파일명이 충돌하면 `--number-filenames`로 기본 파일명 앞에 `01 -`, `02 -` 같은 번호를 붙일 수 있습니다.
@@ -204,13 +204,13 @@ video-dl -i sites.txt -j 5 --sniff-parallel 1
 video-dl -i ./downloads/conan_24.site \
   -o ./downloads \
   --mode browser \
-  --no-auto-click \
-  --no-blank-restore \
-  --block-devtool-detectors \
+  --no-click \
+  --no-restore \
+  --block-devtools \
   -s 5 \
   -j 5 \
-  --sniff-parallel 1 \
-  --number-filenames
+  -S 1 \
+  -N
 ```
 
 배치 모드는 기본적으로 `htop`처럼 터미널 전체 화면에서 고정된 표 형태로 진행률을 표시합니다. 예전처럼 일반 tqdm 진행바를 쓰려면 `--no-dashboard`를 붙이면 됩니다.
@@ -257,7 +257,7 @@ video-dl "https://example.com/playlist/abc" -x
 추출한 링크를 `sites.txt`로 저장한 뒤 배치 다운로드:
 
 ```bash
-video-dl "https://example.com/playlist/abc" -x --links-output sites.txt
+video-dl "https://example.com/playlist/abc" -x -L sites.txt
 video-dl -i sites.txt -j 3
 ```
 
@@ -270,8 +270,8 @@ video-dl -i sites.txt -j 3
 | `-o`, `--output-dir` | 다운로드 저장 디렉토리 |
 | `-i`, `--input-file` | 한 줄에 하나씩 URL이 있는 파일 |
 | `-j`, `--parallel` | 배치 다운로드 동시 실행 수 |
-| `--sniff-parallel` | 배치에서 브라우저 스니핑 동시 실행 수 |
-| `--number-filenames` | 배치 저장 파일명 앞에 URL 번호 붙이기 |
+| `-S`, `--sniff-parallel` | 배치에서 브라우저 스니핑 동시 실행 수 |
+| `-N`, `--number-filenames` | 배치 저장 파일명 앞에 URL 번호 붙이기 |
 | `-F`, `--fragment-parallel` | HLS/DASH 조각 동시 다운로드 수 |
 | `-r`, `--retries` | 실패 URL 재시도 횟수 |
 | `--dashboard` | 배치 진행률을 전체 화면 표 형태로 표시. 기본값 |
@@ -283,14 +283,16 @@ video-dl -i sites.txt -j 3
 | `-p`, `--use-proxy` | `.proxyinfo` 프록시 설정 사용 |
 | `--proxy-info` | 프록시 설정 파일 경로. 기본값 `.proxyinfo` |
 | `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |
-| `--no-auto-click` | 브라우저 스니핑 중 자동 재생 클릭 끄기 |
+| `-H`, `--headed` | 브라우저 창 표시 |
+| `--no-click`, `--no-auto-click` | 브라우저 스니핑 중 자동 재생 클릭 끄기 |
 | `--user-data-dir` | Chromium 프로필 디렉토리 유지 |
 | `--browser-channel` | `chrome`, `msedge` 같은 설치된 브라우저 채널 사용 |
 | `--spoof-browser` | Chrome-like UA/locale/header와 자동화 흔적 완화 적용 |
-| `--no-blank-restore` | `about:blank` 자동 복구 끄기 |
+| `--no-restore`, `--no-blank-restore` | `about:blank` 자동 복구 끄기 |
 | `--browser-debug-log` | 브라우저 이동/닫힘/요청 실패/스트림 감지 이벤트를 JSONL로 저장 |
-| `--block-devtool-detectors` | `disable-devtool` 같은 anti-devtools 스크립트 요청 차단 |
+| `--block-devtools`, `--block-devtool-detectors` | `disable-devtool` 같은 anti-devtools 스크립트 요청 차단 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
+| `-L`, `--links-output` | 추출한 링크를 저장할 텍스트 파일 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |
 | `--allow-popups` | 새 탭/팝업 자동 차단 끄기 |

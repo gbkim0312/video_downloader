@@ -56,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of URLs to process at the same time when using --input-file.",
     )
     parser.add_argument(
+        "-S",
         "--sniff-parallel",
         type=int,
         default=None,
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "-N",
         "--number-filenames",
         action="store_true",
         help="Prefix batch output filenames with the URL index, such as 01 - title.mp4.",
@@ -131,12 +133,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to keep the page open after trying to start playback.",
     )
     parser.add_argument(
+        "-H",
         "--headed",
         action="store_true",
         help="Show Chromium. Useful for pages that need login, consent, or manual play.",
     )
     parser.add_argument(
+        "--no-click",
         "--no-auto-click",
+        dest="no_auto_click",
         action="store_true",
         help="Do not automatically click play/video elements during browser sniffing.",
     )
@@ -159,7 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-restore",
         "--no-blank-restore",
+        dest="no_blank_restore",
         action="store_true",
         help="Do not re-open the original URL when the page navigates to about:blank.",
     )
@@ -169,7 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write browser navigation, close, failed request, and stream events to JSONL.",
     )
     parser.add_argument(
+        "--block-devtools",
         "--block-devtool-detectors",
+        dest="block_devtool_detectors",
         action="store_true",
         help="Block known anti-devtools scripts such as disable-devtool.",
     )
@@ -228,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extract likely video page links from a playlist/index page instead of downloading.",
     )
     parser.add_argument(
+        "-L",
         "--links-output",
         default=None,
         help="Write extracted video links to this text file.",
