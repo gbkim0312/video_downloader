@@ -149,12 +149,14 @@ class FileSizeProgressMonitor:
         progress_label: str,
         progress_hook: ProgressHook,
         on_growth: Callable[[], None],
+        should_emit: Callable[[], bool] | None = None,
         interval: float = 0.5,
     ) -> None:
         self.output_template = output_template
         self.progress_label = progress_label
         self.progress_hook = progress_hook
         self.on_growth = on_growth
+        self.should_emit = should_emit
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -178,6 +180,8 @@ class FileSizeProgressMonitor:
             self._emit_progress()
 
     def _emit_progress(self) -> None:
+        if self.should_emit is not None and not self.should_emit():
+            return
         size = self._current_size()
         if size is None or size <= 0:
             return
@@ -274,17 +278,26 @@ class YtDlpDownloader:
 
         saw_download_activity = False
         saw_file_growth = False
+        native_progress_seen = False
 
         def handle_progress(status: dict[str, Any]) -> None:
-            nonlocal saw_download_activity
+            nonlocal native_progress_seen, saw_download_activity
             if status.get("status") in {"downloading", "finished"}:
                 saw_download_activity = True
+            if (
+                status.get("status") == "downloading"
+                and status.get("downloaded_bytes")
+            ):
+                native_progress_seen = True
             if progress_hook:
                 progress_hook(progress_label or url, status)
 
         def mark_file_growth() -> None:
             nonlocal saw_file_growth
             saw_file_growth = True
+
+        def should_emit_file_progress() -> bool:
+            return not native_progress_seen
 
         if progress_hook:
             progress_hook(
@@ -331,6 +344,7 @@ class YtDlpDownloader:
                 progress_label=progress_label or url,
                 progress_hook=progress_hook,
                 on_growth=mark_file_growth,
+                should_emit=should_emit_file_progress,
             )
             monitor.start()
 

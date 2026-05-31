@@ -131,14 +131,16 @@ class DashboardProgressReporter:
             downloaded = int(status.get("downloaded_bytes") or 0)
             total = status.get("total_bytes") or status.get("total_bytes_estimate")
             downloaded_mb = downloaded / BYTES_PER_MB
-            total_mb = float(total) / BYTES_PER_MB if total else None
+            job = self._job_for(label)
+            if job.downloaded_mb is not None:
+                downloaded_mb = max(downloaded_mb, job.downloaded_mb)
+            total_mb = float(total) / BYTES_PER_MB if total else job.total_mb
             percent = (
                 min(100.0, downloaded_mb / total_mb * 100)
                 if total_mb
                 else None
             )
 
-            job = self._job_for(label)
             job.state = "downloading"
             job.downloaded_mb = downloaded_mb
             job.total_mb = total_mb
