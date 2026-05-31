@@ -93,6 +93,19 @@ video-dl "https://hoohootv.example/detail/..." \
   -s 5
 ```
 
+자막 파일이 별도로 로드되는 사이트는 `--write-subs`로 영상 옆에 `.srt`/`.vtt` 파일을 같이 저장할 수 있습니다. 브라우저에서 감지한 자막 요청을 그대로 저장하므로, 자막이 재생 후 네트워크에 나타나는 페이지에서는 `--mode browser`와 함께 쓰는 것이 좋습니다.
+
+```bash
+video-dl "https://hoohootv.example/detail/..." \
+  --mode browser \
+  --write-subs \
+  --no-click \
+  --no-restore \
+  --block-devtools \
+  -s 15 \
+  -o ./downloads
+```
+
 재생 버튼 클릭 시 뜨는 악성 광고 팝업은 기본으로 닫고, 명확한 광고 네트워크 요청은 차단합니다. 새 탭에서 실제 영상이 열리는 경우를 위해 광고처럼 보이지 않는 새 탭은 유지하며, 스트림 감지는 열린 모든 탭에서 수행합니다. 영상 사이트가 정상 동작하는 데 팝업 차단이 방해될 때만 끌 수 있습니다.
 
 ```bash
@@ -280,6 +293,7 @@ video-dl -i sites.txt -j 3
 | `-c`, `--candidate` | 다운로드할 후보 번호 |
 | `-m`, `--mode` | `auto`, `browser`, `ytdlp` 중 선택 |
 | `--no-fallback` | 브라우저 감지 실패 시 `yt-dlp` fallback 끄기 |
+| `--write-subs` | 감지된 `.srt`/`.vtt` 자막 파일 함께 저장 |
 | `-p`, `--use-proxy` | `.proxyinfo` 프록시 설정 사용 |
 | `--proxy-info` | 프록시 설정 파일 경로. 기본값 `.proxyinfo` |
 | `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |

@@ -43,6 +43,22 @@ class StreamCandidate:
         return "unknown"
 
 
+@dataclass(slots=True)
+class SubtitleCandidate:
+    url: str
+    content_type: str = ""
+    language: str = ""
+    extension: str = "srt"
+    page_title: str = ""
+    discovered_at: float = 0.0
+    request_headers: dict[str, str] = field(default_factory=dict)
+    response_headers: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def host(self) -> str:
+        return urlparse(self.url).hostname or ""
+
+
 @dataclass(frozen=True, slots=True)
 class LinkCandidate:
     url: str

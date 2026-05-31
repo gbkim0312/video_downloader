@@ -16,12 +16,13 @@ from .context import (
 )
 from .debug import BrowserDebugLog
 from .protection import install_popup_protection
-from video_downloader.domain.models import ProxySettings, StreamCandidate
+from video_downloader.domain.models import ProxySettings, StreamCandidate, SubtitleCandidate
 from video_downloader.domain.scoring import content_score
 
 
 STREAM_EXTENSIONS = (".m3u8", ".mpd", ".mp4", ".m4v", ".webm", ".mov")
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
+SUBTITLE_EXTENSIONS = (".srt", ".vtt", ".ass", ".ssa", ".ttml", ".dfxp")
 VIDEO_CONTENT_TYPES = (
     "application/vnd.apple.mpegurl",
     "application/x-mpegurl",
@@ -29,6 +30,12 @@ VIDEO_CONTENT_TYPES = (
     "video/",
 )
 IMAGE_CONTENT_TYPES = ("image/",)
+SUBTITLE_CONTENT_TYPES = (
+    "text/vtt",
+    "application/x-subrip",
+    "application/ttml+xml",
+    "application/x-ass",
+)
 
 
 def looks_like_stream(url: str, content_type: str = "") -> bool:
@@ -41,6 +48,29 @@ def looks_like_stream(url: str, content_type: str = "") -> bool:
     return any(path.endswith(ext) for ext in STREAM_EXTENSIONS) or any(
         marker in lower_type for marker in VIDEO_CONTENT_TYPES
     )
+
+
+def looks_like_subtitle(url: str, content_type: str = "") -> bool:
+    path = urlparse(url).path.lower().rstrip("/")
+    lower_type = content_type.lower()
+    return any(path.endswith(ext) for ext in SUBTITLE_EXTENSIONS) or any(
+        marker in lower_type for marker in SUBTITLE_CONTENT_TYPES
+    )
+
+
+def subtitle_extension(url: str, content_type: str = "") -> str:
+    path = urlparse(url).path.lower().rstrip("/")
+    for extension in SUBTITLE_EXTENSIONS:
+        if path.endswith(extension):
+            return extension.lstrip(".")
+    lower_type = content_type.lower()
+    if "vtt" in lower_type:
+        return "vtt"
+    if "ttml" in lower_type:
+        return "ttml"
+    if "ass" in lower_type:
+        return "ass"
+    return "srt"
 
 
 def parse_content_length(headers: dict[str, str]) -> int | None:
@@ -104,6 +134,18 @@ def dedupe_candidates(candidates: Iterable[StreamCandidate]) -> list[StreamCandi
     return list(by_url.values())
 
 
+def dedupe_subtitles(candidates: Iterable[SubtitleCandidate]) -> list[SubtitleCandidate]:
+    by_url: dict[str, SubtitleCandidate] = {}
+    for candidate in candidates:
+        existing = by_url.get(candidate.url)
+        if existing is None:
+            by_url[candidate.url] = candidate
+            continue
+        if not existing.page_title and candidate.page_title:
+            existing.page_title = candidate.page_title
+    return list(by_url.values())
+
+
 def cookie_header_for_host(cookies: list[dict[str, Any]], host: str) -> str:
     values = []
     normalized_host = host.lower()
@@ -150,7 +192,12 @@ class BrowserStreamSniffer:
         self.debug_log = BrowserDebugLog(debug_log_path) if debug_log_path else None
         self._debug_attached_pages: set[int] = set()
 
-    async def sniff(self, url: str) -> list[StreamCandidate]:
+    async def sniff(
+        self,
+        url: str,
+        *,
+        subtitle_candidates: list[SubtitleCandidate] | None = None,
+    ) -> list[StreamCandidate]:
         try:
             from playwright.async_api import async_playwright
         except ModuleNotFoundError as exc:
@@ -161,6 +208,7 @@ class BrowserStreamSniffer:
 
         started = time.monotonic()
         candidates: list[StreamCandidate] = []
+        subtitles: list[SubtitleCandidate] = []
         pending: set[asyncio.Task[None]] = set()
         observed_pages: list[Any] = []
 
@@ -206,7 +254,7 @@ class BrowserStreamSniffer:
 
             def schedule(response: Any) -> None:
                 task = asyncio.create_task(
-                    self._handle_response(response, candidates, started)
+                    self._handle_response(response, candidates, subtitles, started)
                 )
                 pending.add(task)
                 task.add_done_callback(pending.discard)
@@ -235,8 +283,16 @@ class BrowserStreamSniffer:
                 for candidate in candidates:
                     if not candidate.page_title:
                         candidate.page_title = page_title
+                for candidate in subtitles:
+                    if not candidate.page_title:
+                        candidate.page_title = page_title
             cookies = await context.cookies()
             for candidate in candidates:
+                if "cookie" not in candidate.request_headers:
+                    cookie_header = cookie_header_for_host(cookies, candidate.host)
+                    if cookie_header:
+                        candidate.request_headers["cookie"] = cookie_header
+            for candidate in subtitles:
                 if "cookie" not in candidate.request_headers:
                     cookie_header = cookie_header_for_host(cookies, candidate.host)
                     if cookie_header:
@@ -244,6 +300,8 @@ class BrowserStreamSniffer:
 
             await self._close(context, browser)
 
+        if subtitle_candidates is not None:
+            subtitle_candidates.extend(dedupe_subtitles(subtitles))
         unique = dedupe_candidates(candidates)
         return sorted(unique, key=content_score, reverse=True)
 
@@ -393,10 +451,33 @@ class BrowserStreamSniffer:
         self,
         response: Any,
         candidates: list[StreamCandidate],
+        subtitles: list[SubtitleCandidate],
         started: float,
     ) -> None:
         headers = await response.all_headers()
         content_type = headers.get("content-type", "")
+        request = response.request
+        request_headers = await request.all_headers()
+        if looks_like_subtitle(response.url, content_type):
+            if self.debug_log:
+                self.debug_log.event(
+                    "subtitle_candidate_seen",
+                    url=response.url,
+                    content_type=content_type,
+                    status=response.status,
+                )
+            subtitles.append(
+                SubtitleCandidate(
+                    url=response.url,
+                    content_type=content_type,
+                    extension=subtitle_extension(response.url, content_type),
+                    discovered_at=time.monotonic() - started,
+                    request_headers=request_headers,
+                    response_headers=headers,
+                )
+            )
+            return
+
         if not looks_like_stream(response.url, content_type):
             return
         if self.debug_log:
@@ -407,10 +488,8 @@ class BrowserStreamSniffer:
                 status=response.status,
             )
 
-        request = response.request
         if request.resource_type == "image":
             return
-        request_headers = await request.all_headers()
         candidate = StreamCandidate(
             url=response.url,
             content_type=content_type,
@@ -458,6 +537,7 @@ def sniff_streams(
     restore_blank: bool = True,
     block_devtool_detectors: bool = False,
     debug_log_path: str | None = None,
+    subtitle_candidates: list[SubtitleCandidate] | None = None,
 ) -> list[StreamCandidate]:
     sniffer = BrowserStreamSniffer(
         headless=headless,
@@ -473,7 +553,7 @@ def sniff_streams(
         block_devtool_detectors=block_devtool_detectors,
         debug_log_path=debug_log_path,
     )
-    return asyncio.run(sniffer.sniff(url))
+    return asyncio.run(sniffer.sniff(url, subtitle_candidates=subtitle_candidates))
 
 
 class PlaywrightStreamSniffer:
@@ -493,6 +573,7 @@ class PlaywrightStreamSniffer:
         restore_blank: bool = True,
         block_devtool_detectors: bool = False,
         debug_log_path: str | None = None,
+        subtitle_candidates: list[SubtitleCandidate] | None = None,
     ) -> list[StreamCandidate]:
         return sniff_streams(
             url,
@@ -508,4 +589,5 @@ class PlaywrightStreamSniffer:
             restore_blank=restore_blank,
             block_devtool_detectors=block_devtool_detectors,
             debug_log_path=debug_log_path,
+            subtitle_candidates=subtitle_candidates,
         )

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from video_downloader.domain.models import ProxySettings, StreamCandidate
+from video_downloader.domain.models import ProxySettings, StreamCandidate, SubtitleCandidate
 
 ProgressHook = Callable[[str, dict[str, Any]], None]
 
@@ -34,3 +35,13 @@ class MediaDownloaderPort(Protocol):
         proxy_settings: ProxySettings | None = None,
     ) -> str:
         """Download a selected stream candidate and return a result status."""
+
+    def download_subtitle(
+        self,
+        subtitle: SubtitleCandidate,
+        *,
+        output_template: str,
+        index: int = 1,
+        proxy_settings: ProxySettings | None = None,
+    ) -> Path:
+        """Download a selected subtitle candidate and return its output path."""

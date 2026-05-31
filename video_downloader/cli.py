@@ -216,6 +216,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the selected stream URL before downloading.",
     )
+    parser.add_argument(
+        "--write-subs",
+        action="store_true",
+        help="Download detected subtitle files such as .srt or .vtt next to the video.",
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output.")
     parser.add_argument(
         "--dashboard",
@@ -283,6 +288,7 @@ def make_download_options(args: argparse.Namespace) -> DownloadOptions:
         restore_blank=not args.no_blank_restore,
         block_devtool_detectors=args.block_devtool_detectors,
         browser_debug_log=args.browser_debug_log,
+        write_subs=args.write_subs,
     )
 
 

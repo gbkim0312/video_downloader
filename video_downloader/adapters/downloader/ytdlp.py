@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urljoin, urlparse
 
-from video_downloader.domain.models import ProxySettings, StreamCandidate
+from video_downloader.domain.models import ProxySettings, StreamCandidate, SubtitleCandidate
 
 
 ProgressHook = Callable[[str, dict[str, Any]], None]
@@ -54,6 +54,15 @@ def headers_for_candidate(candidate: StreamCandidate) -> dict[str, str]:
         headers["User-Agent"] = candidate.user_agent
     if candidate.referer:
         headers["Referer"] = candidate.referer
+    return headers
+
+
+def headers_for_subtitle(candidate: SubtitleCandidate) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for name, value in candidate.request_headers.items():
+        lower_name = name.lower()
+        if lower_name in FORWARDED_HEADER_NAMES and value:
+            headers[_canonical_header_name(lower_name)] = value
     return headers
 
 
@@ -104,6 +113,22 @@ def is_file_input(url: str) -> bool:
     if parsed.scheme:
         return False
     return Path(url).exists()
+
+
+def subtitle_output_path(
+    output_template: str,
+    subtitle: SubtitleCandidate,
+    *,
+    index: int = 1,
+) -> Path:
+    extension = subtitle.extension or "srt"
+    path_text = output_template
+    path_text = re.sub(r"%\(ext\)(?:[.#0 +\-]?\d*)?[A-Za-z]", extension, path_text)
+    path_text = re.sub(r"%\([^)]+\)(?:[.#0 +\-]?\d*)?[A-Za-z]", "subtitle", path_text)
+    path = Path(path_text)
+    if index > 1:
+        path = path.with_name(f"{path.stem}.{index}{path.suffix}")
+    return path
 
 
 def _output_template_to_glob(output_template: str) -> str:
@@ -356,3 +381,37 @@ class YtDlpDownloader:
             fragment_parallel=fragment_parallel,
             proxy_settings=proxy_settings,
         )
+
+    def download_subtitle(
+        self,
+        subtitle: SubtitleCandidate,
+        *,
+        output_template: str,
+        index: int = 1,
+        proxy_settings: ProxySettings | None = None,
+    ) -> Path:
+        try:
+            import requests
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Missing dependency: requests. Install with `pip install -e .`."
+            ) from exc
+
+        output_path = subtitle_output_path(output_template, subtitle, index=index)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        headers = headers_for_subtitle(subtitle)
+        proxies = None
+        if proxy_settings:
+            proxies = {
+                "http": proxy_settings.proxy_url,
+                "https": proxy_settings.proxy_url,
+            }
+        response = requests.get(
+            subtitle.url,
+            headers=headers,
+            proxies=proxies,
+            timeout=30,
+        )
+        response.raise_for_status()
+        output_path.write_bytes(response.content)
+        return output_path

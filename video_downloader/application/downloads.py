@@ -20,6 +20,7 @@ from video_downloader.domain.models import (
     BatchSummary,
     ProxySettings,
     StreamCandidate,
+    SubtitleCandidate,
 )
 from video_downloader.domain.scoring import is_likely_ad, is_short_duration_only_ad
 from video_downloader.ports.browser import StreamSnifferPort
@@ -28,6 +29,12 @@ from video_downloader.ports.storage import UrlListStorePort
 
 RESULT_FAILED = "failed"
 SUCCESS_RESULTS = {0, DOWNLOAD_DOWNLOADED, DOWNLOAD_SKIPPED}
+
+
+@dataclass(frozen=True, slots=True)
+class SniffedMedia:
+    streams: list[StreamCandidate]
+    subtitles: list[SubtitleCandidate]
 
 
 class ProxyUnavailableError(RuntimeError):
@@ -66,6 +73,7 @@ class DownloadOptions:
     block_devtool_detectors: bool = False
     browser_debug_log: str | None = None
     filename_prefix: str = ""
+    write_subs: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,11 +151,13 @@ class DownloadService:
         progress_label: str,
         show_candidates: bool,
     ) -> tuple[int | str, list[StreamCandidate]]:
+        subtitles: list[SubtitleCandidate] = []
         candidates = self.sniff_candidates(
             url,
             options=options,
             progress_reporter=progress_reporter,
             progress_label=progress_label,
+            subtitle_candidates=subtitles,
         )
         return self.download_candidates(
             url,
@@ -157,6 +167,7 @@ class DownloadService:
             progress_reporter=progress_reporter,
             progress_label=progress_label,
             show_candidates=show_candidates,
+            subtitles=subtitles,
         )
 
     def sniff_candidates(
@@ -166,6 +177,7 @@ class DownloadService:
         options: DownloadOptions,
         progress_reporter: ProgressReporterPort | None,
         progress_label: str,
+        subtitle_candidates: list[SubtitleCandidate] | None = None,
     ) -> list[StreamCandidate]:
         if not options.quiet:
             browser_mode = "headless Chromium" if options.headless else "headed Chromium"
@@ -192,6 +204,7 @@ class DownloadService:
             restore_blank=options.restore_blank,
             block_devtool_detectors=options.block_devtool_detectors,
             debug_log_path=options.browser_debug_log,
+            subtitle_candidates=subtitle_candidates,
         )
 
         if not options.quiet:
@@ -213,6 +226,7 @@ class DownloadService:
         progress_reporter: ProgressReporterPort | None,
         progress_label: str,
         show_candidates: bool,
+        subtitles: list[SubtitleCandidate] | tuple[SubtitleCandidate, ...] = (),
     ) -> tuple[int | str, list[StreamCandidate]]:
         if options.list_only:
             return 0, candidates
@@ -238,6 +252,7 @@ class DownloadService:
 
         last_error: Exception | None = None
         total_selected = len(selected_candidates)
+        subtitles_downloaded = False
         for attempt, selected in enumerate(selected_candidates, start=1):
             candidate_number = options.candidate_index + attempt - 1
             if options.print_url:
@@ -261,6 +276,15 @@ class DownloadService:
                     )
 
             try:
+                if not subtitles_downloaded:
+                    self._download_subtitles(
+                        subtitles,
+                        selected_output,
+                        options=options,
+                        progress_reporter=progress_reporter,
+                        progress_label=progress_label,
+                    )
+                    subtitles_downloaded = True
                 result = self._download_with_proxy_rotation(
                     lambda: self.downloader.download_candidate(
                         selected,
@@ -310,6 +334,7 @@ class DownloadService:
         progress_reporter: ProgressReporterPort | None,
         progress_label: str,
         show_candidates: bool,
+        subtitles: list[SubtitleCandidate] | tuple[SubtitleCandidate, ...] = (),
     ) -> tuple[int | str, list[StreamCandidate]]:
         try:
             return self.download_candidates(
@@ -320,6 +345,7 @@ class DownloadService:
                 progress_reporter=progress_reporter,
                 progress_label=progress_label,
                 show_candidates=show_candidates,
+                subtitles=subtitles,
             )
         except NoStreamCandidatesError:
             if options.mode != "auto" or options.no_fallback:
@@ -457,6 +483,47 @@ class DownloadService:
             progress_reporter.message(label, text)
         else:
             print(text)
+
+    def _download_subtitles(
+        self,
+        subtitles: list[SubtitleCandidate] | tuple[SubtitleCandidate, ...],
+        output_template: str,
+        *,
+        options: DownloadOptions,
+        progress_reporter: ProgressReporterPort | None,
+        progress_label: str,
+    ) -> None:
+        if not options.write_subs:
+            return
+        if not subtitles:
+            if not options.quiet:
+                self._message(progress_reporter, progress_label, "No subtitles found.")
+            return
+
+        saved_count = 0
+        for index, subtitle in enumerate(subtitles, start=1):
+            try:
+                self.downloader.download_subtitle(
+                    subtitle,
+                    output_template=output_template,
+                    index=index,
+                    proxy_settings=options.proxy_settings,
+                )
+                saved_count += 1
+            except Exception as exc:
+                if not options.quiet:
+                    self._message(
+                        progress_reporter,
+                        progress_label,
+                        f"subtitle download failed: {exc}",
+                    )
+
+        if saved_count and not options.quiet:
+            self._message(
+                progress_reporter,
+                progress_label,
+                f"Downloaded {saved_count} subtitle file(s).",
+            )
 
     def _download_with_proxy_rotation(
         self,
@@ -647,7 +714,7 @@ class BatchDownloadService:
         sniff_workers = batch_options.sniff_parallel or batch_options.parallel
         sniff_executor = ThreadPoolExecutor(max_workers=sniff_workers)
         download_executor = ThreadPoolExecutor(max_workers=batch_options.parallel)
-        sniff_futures: dict[Future[list[StreamCandidate]], tuple[BatchJob, str]] = {}
+        sniff_futures: dict[Future[SniffedMedia], tuple[BatchJob, str]] = {}
         download_futures: dict[Future[int | str], tuple[BatchJob, str]] = {}
         try:
             for job in jobs:
@@ -669,7 +736,7 @@ class BatchDownloadService:
                     if future in sniff_futures:
                         job, label = sniff_futures.pop(future)
                         try:
-                            candidates = future.result()
+                            media = future.result()
                         except Exception as exc:
                             reporter.message(label, f"sniff failed: {exc} url={job.url}")
                             on_result(job, label, RESULT_FAILED)
@@ -679,7 +746,8 @@ class BatchDownloadService:
                             download_executor.submit(
                                 self._process_prefetched,
                                 job.url,
-                                candidates,
+                                media.streams,
+                                media.subtitles,
                                 output_template,
                                 self._job_options(
                                     download_options,
@@ -788,18 +856,22 @@ class BatchDownloadService:
         options: DownloadOptions,
         reporter: ProgressReporterPort,
         label: str,
-    ) -> list[StreamCandidate]:
-        return self.download_service.sniff_candidates(
+    ) -> SniffedMedia:
+        subtitles: list[SubtitleCandidate] = []
+        streams = self.download_service.sniff_candidates(
             url,
             options=options,
             progress_reporter=reporter,
             progress_label=label,
+            subtitle_candidates=subtitles,
         )
+        return SniffedMedia(streams=streams, subtitles=subtitles)
 
     def _process_prefetched(
         self,
         url: str,
         candidates: list[StreamCandidate],
+        subtitles: list[SubtitleCandidate],
         output_template: str,
         options: DownloadOptions,
         reporter: ProgressReporterPort,
@@ -814,6 +886,7 @@ class BatchDownloadService:
                 progress_reporter=reporter,
                 progress_label=label,
                 show_candidates=options.list_only,
+                subtitles=subtitles,
             )
             return result
         except Exception as exc:
