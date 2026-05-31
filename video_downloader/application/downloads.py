@@ -73,7 +73,7 @@ class DownloadOptions:
     block_devtool_detectors: bool = False
     browser_debug_log: str | None = None
     filename_prefix: str = ""
-    write_subs: bool = False
+    write_subs: bool = True
 
 
 @dataclass(frozen=True, slots=True)

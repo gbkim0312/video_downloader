@@ -218,8 +218,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--write-subs",
+        dest="write_subs",
         action="store_true",
+        default=True,
         help="Download detected subtitle files such as .srt or .vtt next to the video.",
+    )
+    parser.add_argument(
+        "--no-write-subs",
+        dest="write_subs",
+        action="store_false",
+        help="Do not download detected subtitle files.",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output.")
     parser.add_argument(

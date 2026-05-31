@@ -93,12 +93,11 @@ video-dl "https://hoohootv.example/detail/..." \
   -s 5
 ```
 
-자막 파일이 별도로 로드되는 사이트는 `--write-subs`로 영상 옆에 `.srt`/`.vtt` 파일을 같이 저장할 수 있습니다. 브라우저에서 감지한 자막 요청을 그대로 저장하므로, 자막이 재생 후 네트워크에 나타나는 페이지에서는 `--mode browser`와 함께 쓰는 것이 좋습니다.
+자막 파일이 별도로 로드되는 사이트는 기본적으로 영상 옆에 `.srt`/`.vtt` 파일을 같이 저장합니다. 브라우저에서 감지한 자막 요청을 그대로 저장하므로, 자막이 재생 후 네트워크에 나타나는 페이지에서는 `--mode browser`와 함께 쓰는 것이 좋습니다. 자막 저장을 끄려면 `--no-write-subs`를 붙입니다.
 
 ```bash
 video-dl "https://hoohootv.example/detail/..." \
   --mode browser \
-  --write-subs \
   --no-click \
   --no-restore \
   --block-devtools \
@@ -293,7 +292,8 @@ video-dl -i sites.txt -j 3
 | `-c`, `--candidate` | 다운로드할 후보 번호 |
 | `-m`, `--mode` | `auto`, `browser`, `ytdlp` 중 선택 |
 | `--no-fallback` | 브라우저 감지 실패 시 `yt-dlp` fallback 끄기 |
-| `--write-subs` | 감지된 `.srt`/`.vtt` 자막 파일 함께 저장 |
+| `--write-subs` | 감지된 `.srt`/`.vtt` 자막 파일 함께 저장. 기본값 |
+| `--no-write-subs` | 자막 자동 저장 끄기 |
 | `-p`, `--use-proxy` | `.proxyinfo` 프록시 설정 사용 |
 | `--proxy-info` | 프록시 설정 파일 경로. 기본값 `.proxyinfo` |
 | `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |
