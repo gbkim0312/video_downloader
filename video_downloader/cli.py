@@ -462,7 +462,7 @@ def run_link_extraction(args: argparse.Namespace) -> int:
     page_start = args.link_page_start
     page_end = args.link_page_end
     if page_start is None and page_end is not None:
-        page_start = page_end
+        page_start = 1
     elif page_start is not None and page_end is None:
         page_end = page_start
 

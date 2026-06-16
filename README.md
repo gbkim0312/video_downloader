@@ -145,6 +145,7 @@ video-dl -i sites.txt -j 3
 
 페이지 이동 없이 목록만 바뀌는 페이지네이션은 페이지 번호 범위를 지정해 차례로 클릭하며 추출할 수 있습니다.
 옵션을 주지 않으면 기존처럼 현재 보이는 페이지만 추출합니다.
+`--link-page-end`만 주면 1페이지부터 지정한 페이지까지 추출합니다.
 
 ```bash
 video-dl "https://example.com/playlist/abc" -x --link-page-start 1 --link-page-end 5 -L sites.txt
