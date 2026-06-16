@@ -69,10 +69,10 @@ video-dl "https://example.com/watch/123" -l --headed --no-auto-click --no-blank-
 video-dl "https://example.com/watch/123" -l --headed --no-auto-click --no-blank-restore --block-devtool-detectors -s 120
 ```
 
-후후티비처럼 `disable-devtool` 감지와 리다이렉트가 있는 사이트는 브라우저 감지 모드로만 받는 편이 안정적입니다. 단일 영상은 자동 클릭과 blank 복구를 끄고 anti-devtools 스크립트를 차단합니다.
+`disable-devtool` 감지와 리다이렉트가 있는 사이트는 브라우저 감지 모드로만 받는 편이 안정적입니다. 단일 영상은 자동 클릭과 blank 복구를 끄고 anti-devtools 스크립트를 차단합니다.
 
 ```bash
-video-dl "https://hoohootv.example/detail/..." \
+video-dl "https://example.com/detail/..." \
   --mode browser \
   --no-auto-click \
   --no-blank-restore \
@@ -84,7 +84,7 @@ video-dl "https://hoohootv.example/detail/..." \
 후보만 먼저 확인하려면 `-l`을 붙입니다.
 
 ```bash
-video-dl "https://hoohootv.example/detail/..." \
+video-dl "https://example.com/detail/..." \
   -l \
   --mode browser \
   --no-auto-click \
@@ -96,7 +96,7 @@ video-dl "https://hoohootv.example/detail/..." \
 자막 파일이 별도로 로드되는 사이트는 기본적으로 영상 옆에 `.srt`/`.vtt` 파일을 같이 저장합니다. 브라우저에서 감지한 자막 요청을 그대로 저장하므로, 자막이 재생 후 네트워크에 나타나는 페이지에서는 `--mode browser`와 함께 쓰는 것이 좋습니다. 자막 저장을 끄려면 `--no-write-subs`를 붙입니다.
 
 ```bash
-video-dl "https://hoohootv.example/detail/..." \
+video-dl "https://example.com/detail/..." \
   --mode browser \
   --no-click \
   --no-restore \
@@ -210,10 +210,10 @@ video-dl -i sites.txt -j 3
 video-dl -i sites.txt -j 5 -S 1
 ```
 
-후후티비 같은 사이트를 여러 개 받을 때는 브라우저 스니핑을 하나씩만 수행하고, `yt-dlp` fallback을 피하기 위해 `--mode browser`를 같이 쓰는 것을 권장합니다. 에피소드 제목이 같아 파일명이 충돌하면 `--number-filenames`로 기본 파일명 앞에 `01 -`, `02 -` 같은 번호를 붙일 수 있습니다.
+자동화 방지나 리다이렉트가 있는 사이트를 여러 개 받을 때는 브라우저 스니핑을 하나씩만 수행하고, `yt-dlp` fallback을 피하기 위해 `--mode browser`를 같이 쓰는 것을 권장합니다. 에피소드 제목이 같아 파일명이 충돌하면 `--number-filenames`로 기본 파일명 앞에 `01 -`, `02 -` 같은 번호를 붙일 수 있습니다.
 
 ```bash
-video-dl -i ./downloads/conan_24.site \
+video-dl -i ./downloads/episodes.site \
   -o ./downloads \
   --mode browser \
   --no-click \
