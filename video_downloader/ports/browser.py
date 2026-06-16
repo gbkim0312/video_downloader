@@ -47,5 +47,7 @@ class LinkExtractorPort(Protocol):
         browser_channel: str | None = None,
         spoof_browser: bool = False,
         block_devtool_detectors: bool = False,
+        page_start: int | None = None,
+        page_end: int | None = None,
     ) -> list[LinkCandidate]:
         """Return likely video page links observed in a browser page."""
