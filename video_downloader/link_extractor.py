@@ -88,7 +88,18 @@ async def _collect_link_rows(page) -> list[dict]:
     )
 
 
-async def _click_page_number(page, page_number: int) -> None:
+async def _is_disabled(item) -> bool:
+    aria_disabled = await item.get_attribute("aria-disabled")
+    disabled = await item.get_attribute("disabled")
+    class_name = (await item.get_attribute("class")) or ""
+    return (
+        aria_disabled == "true"
+        or disabled is not None
+        or "disabled" in class_name.lower()
+    )
+
+
+async def _click_page_number(page, page_number: int) -> bool:
     page_text = str(page_number)
     locator = page.locator("a, button, [role=button], [role=link]").filter(
         has_text=page_text
@@ -100,12 +111,37 @@ async def _click_page_number(page, page_number: int) -> None:
             text = (await item.inner_text(timeout=1000)).strip()
             if text != page_text or not await item.is_visible():
                 continue
+            if await _is_disabled(item):
+                continue
             await item.scroll_into_view_if_needed(timeout=2000)
             await item.click(timeout=5000)
-            return
+            return True
         except Exception:
             continue
-    raise ValueError(f"could not find clickable page number: {page_number}")
+    return False
+
+
+async def _click_next_page(page) -> bool:
+    next_labels = ("next", "다음", ">", "›", "»")
+    locator = page.locator("a, button, [role=button], [role=link]")
+    count = await locator.count()
+    for index in range(count):
+        item = locator.nth(index)
+        try:
+            if not await item.is_visible() or await _is_disabled(item):
+                continue
+            text = (await item.inner_text(timeout=1000)).strip()
+            aria_label = (await item.get_attribute("aria-label")) or ""
+            title = (await item.get_attribute("title")) or ""
+            label = " ".join([text, aria_label, title]).strip().lower()
+            if not any(next_label in label for next_label in next_labels):
+                continue
+            await item.scroll_into_view_if_needed(timeout=2000)
+            await item.click(timeout=5000)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 async def _collect_paginated_link_rows(
@@ -117,13 +153,16 @@ async def _collect_paginated_link_rows(
 ) -> list[dict]:
     rows: list[dict] = []
     if page_start > 1:
-        await _click_page_number(page, page_start)
+        if not await _click_page_number(page, page_start):
+            raise ValueError(f"could not find clickable page number: {page_start}")
         await page.wait_for_timeout(int(wait_seconds * 1000))
 
     for page_number in range(page_start, page_end + 1):
         rows.extend(await _collect_link_rows(page))
         if page_number < page_end:
-            await _click_page_number(page, page_number + 1)
+            if not await _click_page_number(page, page_number + 1):
+                if not await _click_next_page(page):
+                    break
             await page.wait_for_timeout(int(wait_seconds * 1000))
     return rows
 
