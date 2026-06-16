@@ -20,6 +20,7 @@ class DashboardJob:
     total_mb: float | None = None
     speed: str = "-"
     percent: float | None = None
+    completed: bool = False
 
 
 class DashboardProgressReporter:
@@ -105,7 +106,12 @@ class DashboardProgressReporter:
         if not self.enabled:
             return
         with self._lock:
-            self.close_bar(label)
+            job = self._job_for(label)
+            if job.completed:
+                return
+            job.completed = True
+            if job.percent is not None:
+                job.percent = max(job.percent, 100.0)
             self._completed += 1
             self._refresh()
 
@@ -130,16 +136,17 @@ class DashboardProgressReporter:
 
             downloaded = int(status.get("downloaded_bytes") or 0)
             total = status.get("total_bytes") or status.get("total_bytes_estimate")
+            job = self._job_for(label)
             downloaded_mb = downloaded / BYTES_PER_MB
-            total_mb = float(total) / BYTES_PER_MB if total else None
+            total_mb = float(total) / BYTES_PER_MB if total else job.total_mb
             percent = (
                 min(100.0, downloaded_mb / total_mb * 100)
                 if total_mb
-                else None
+                else job.percent
             )
 
-            job = self._job_for(label)
             job.state = "downloading"
+            job.completed = False
             job.downloaded_mb = downloaded_mb
             job.total_mb = total_mb
             job.percent = percent
@@ -162,10 +169,32 @@ class DashboardProgressReporter:
         job = self._jobs.get(label)
         if job is not None:
             return job
+        self._reclaim_completed_position()
         self._positions[label] = self._next_position()
         job = DashboardJob(label=label)
         self._jobs[label] = job
         return job
+
+    def _reclaim_completed_position(self) -> None:
+        if self._free_positions:
+            return
+        completed = sorted(
+            (
+                (position, label)
+                for label, position in self._positions.items()
+                if self._jobs.get(label) and self._jobs[label].completed
+            ),
+            key=lambda item: item[0],
+        )
+        if not completed:
+            return
+        position, label = completed[0]
+        self._jobs.pop(label, None)
+        self._positions.pop(label, None)
+        self._last_updated.pop(label, None)
+        if position <= self.worker_slots:
+            self._free_positions.append(position)
+            self._free_positions.sort()
 
     def _next_position(self) -> int:
         if self._free_positions:
