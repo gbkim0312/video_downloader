@@ -7,6 +7,7 @@ from typing import Any
 
 
 BYTES_PER_MB = 1024 * 1024
+LABEL_WIDTH = 18
 
 
 def bytes_to_mb(value: int | float | None) -> float | None:
@@ -22,6 +23,12 @@ def format_mb(value: int | float | None) -> str:
     return f"{mb:.1f}"
 
 
+def format_mb_value(value: int | float | None) -> str:
+    if value is None:
+        return "?"
+    return f"{float(value):.1f}"
+
+
 class ProgressReporter:
     def __init__(
         self,
@@ -30,14 +37,19 @@ class ProgressReporter:
         min_interval: float = 0.2,
         total_jobs: int = 0,
         worker_slots: int = 0,
+        show_status_messages: bool = False,
+        leave_bars: bool = False,
     ) -> None:
         self.enabled = enabled
         self.min_interval = min_interval
+        self.show_status_messages = show_status_messages
+        self.leave_bars = leave_bars
         self._lock = threading.RLock()
         self._last_updated: dict[str, float] = {}
         self._bars: dict[str, Any] = {}
         self._last_downloaded: dict[str, int] = {}
         self._positions: dict[str, int] = {}
+        self._deferred_messages: list[str] = []
         self._free_positions = list(range(1, worker_slots + 1))
         self._next_position = worker_slots + 1
         self._overall = None
@@ -76,17 +88,32 @@ class ProgressReporter:
             if self._overall is not None:
                 self._overall.close()
                 self._overall = None
+            self._flush_messages()
 
     def message(self, label: str, text: str) -> None:
         if not self.enabled:
             return
         with self._lock:
-            if label == "batch":
-                if self._overall is not None:
-                    self._overall.set_postfix_str(text, refresh=True)
+            message = self._deferred_message(label, text)
+            if message:
+                self._deferred_messages.append(message)
                 return
-            bar = self._status_bar_for(label)
-            bar.set_description_str(f"{label}: {self._compact(text)}", refresh=True)
+            if self.show_status_messages:
+                self._write_status(text)
+
+    def _write_status(self, text: str) -> None:
+        compact = self._compact(text, limit=180)
+        if not compact or compact in {"done", "downloaded", "skipped"}:
+            return
+        if self._bars:
+            self._load_tqdm().write(compact, file=sys.stdout)
+            return
+        print(compact)
+
+    def _set_postfix(self, bar: Any, text: str, *, refresh: bool = False) -> None:
+        bar.postfix = text
+        if refresh:
+            bar.refresh()
 
     def complete_job(self, label: str) -> None:
         if not self.enabled:
@@ -140,22 +167,30 @@ class ProgressReporter:
             return cleaned
         return cleaned[: limit - 3] + "..."
 
-    def _status_bar_for(self, label: str) -> Any:
-        bar = self._bars.get(label)
-        if bar is not None:
-            return bar
+    def _format_label(self, label: str) -> str:
+        return f"{label:<{LABEL_WIDTH}}"[:LABEL_WIDTH]
 
-        bar = self._load_tqdm()(
-            total=1,
-            desc=label,
-            position=self._position_for(label),
-            leave=False,
-            dynamic_ncols=True,
-            file=sys.stdout,
-            bar_format="{desc}",
+    def _deferred_message(self, label: str, text: str) -> str | None:
+        compact = self._compact(text, limit=180)
+        if not compact or compact in {"done", "downloaded", "skipped"}:
+            return None
+        quiet_prefixes = (
+            "Opening page with ",
+            "Found ",
+            "Using page title for filename:",
+            "queued for download",
         )
-        self._bars[label] = bar
-        return bar
+        if compact.startswith(quiet_prefixes):
+            return None
+        return f"{label}: {compact}"
+
+    def _flush_messages(self) -> None:
+        if not self._deferred_messages:
+            return
+        print("Logs:", file=sys.stderr)
+        for message in self._deferred_messages:
+            print(message, file=sys.stderr)
+        self._deferred_messages.clear()
 
     def _bar_for(self, label: str, status: dict[str, Any]) -> Any:
         total_bytes = status.get("total_bytes") or status.get("total_bytes_estimate")
@@ -164,26 +199,31 @@ class ProgressReporter:
             total_mb = bytes_to_mb(total_bytes)
             bar = self._load_tqdm()(
                 total=total_mb,
-                desc=label,
+                desc=self._format_label(label),
                 unit="MB",
                 position=self._position_for(label),
-                leave=False,
+                leave=self.leave_bars,
                 dynamic_ncols=True,
                 file=sys.stdout,
-                bar_format="{l_bar}{bar}| {n:.1f}/{total_fmt} MB [{rate_fmt}{postfix}]",
+                bar_format="{desc}: {bar}| {percentage:3.0f}%{postfix}",
             )
+            self._set_postfix(bar, " starting")
+            if total_mb is None:
+                bar.bar_format = "{desc}: {bar}|{postfix}"
             self._bars[label] = bar
+            bar.refresh()
             return bar
 
         bar.unit = "MB"
-        bar.set_description_str(label, refresh=False)
-        bar.bar_format = "{l_bar}{bar}| {n:.1f}/{total_fmt} MB [{rate_fmt}{postfix}]"
+        bar.set_description_str(self._format_label(label), refresh=False)
+        bar.bar_format = "{desc}: {bar}| {percentage:3.0f}%{postfix}"
         if total_bytes and bar.total is None:
             bar.total = bytes_to_mb(total_bytes)
         elif total_bytes and bar.total == 1 and bar.n == 0:
             bar.total = bytes_to_mb(total_bytes)
         elif not total_bytes and bar.total == 1 and bar.n == 0:
             bar.total = None
+            bar.bar_format = "{desc}: {bar}|{postfix}"
         return bar
 
     def _update_download(self, label: str, status: dict[str, Any]) -> None:
@@ -205,20 +245,24 @@ class ProgressReporter:
 
             speed = status.get("speed")
             total = status.get("total_bytes") or status.get("total_bytes_estimate")
-            bar.set_postfix_str(
-                f"{format_mb(downloaded)}/{format_mb(total)} MB, "
+            downloaded_mb = bytes_to_mb(downloaded)
+            total_mb = bytes_to_mb(total)
+            self._set_postfix(
+                bar,
+                f" {format_mb_value(downloaded_mb)}/{format_mb_value(total_mb)} MB "
                 f"{format_mb(speed)} MB/s",
-                refresh=False,
             )
             bar.refresh()
 
     def _finish_download(self, label: str, total: int | float | None) -> None:
         with self._lock:
             bar = self._bars.get(label)
-            if bar is not None and total:
+            if bar is None:
+                return
+            if total:
                 total_mb = bytes_to_mb(total)
                 bar.total = total_mb
                 if total_mb is not None and bar.n < total_mb:
                     bar.update(total_mb - bar.n)
-                bar.set_postfix_str("processing", refresh=False)
-                bar.refresh()
+            self._set_postfix(bar, " processing")
+            bar.refresh()

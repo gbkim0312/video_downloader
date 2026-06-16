@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.proxyinfo
 
 .pytest_cache/
 .mypy_cache/
@@ -17,5 +18,5 @@ downloads/
 *.webm
 *.mov
 *.m4v
-
+*.site
 .DS_Store

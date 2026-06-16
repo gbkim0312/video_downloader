@@ -18,6 +18,7 @@ class StreamCandidate:
     discovered_at: float = 0.0
     request_headers: dict[str, str] = field(default_factory=dict)
     response_headers: dict[str, str] = field(default_factory=dict)
+    manifest_text: str = ""
 
     @property
     def host(self) -> str:
@@ -40,3 +41,56 @@ class StreamCandidate:
         if lower_type.startswith("video/"):
             return "file"
         return "unknown"
+
+
+@dataclass(slots=True)
+class SubtitleCandidate:
+    url: str
+    content_type: str = ""
+    language: str = ""
+    extension: str = "srt"
+    page_title: str = ""
+    discovered_at: float = 0.0
+    request_headers: dict[str, str] = field(default_factory=dict)
+    response_headers: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def host(self) -> str:
+        return urlparse(self.url).hostname or ""
+
+
+@dataclass(frozen=True, slots=True)
+class LinkCandidate:
+    url: str
+    text: str = ""
+    has_thumbnail: bool = False
+    score: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class BatchJob:
+    index: int
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class BatchSummary:
+    downloaded: int
+    skipped: int
+    failed: int
+    total: int
+    failed_jobs: tuple[BatchJob, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProxySettings:
+    proxy_url: str
+    control_host: str = "127.0.0.1"
+    control_port: int = 9051
+    control_password: str | None = None
+    newnym_delay: float = 10
+    rotation_retries: int = 1
+    rotate_on_status: tuple[int, ...] = (403, 429, 500, 502, 503, 504)
+    ip_check_url: str = "https://api.ipify.org"
+    kill_switch: bool = True
+    connect_retries: int = 3

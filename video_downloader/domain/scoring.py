@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qs, urlparse
 
-from .models import StreamCandidate
+from .models import LinkCandidate, StreamCandidate
 
 
 AD_KEYWORDS = (
@@ -36,6 +37,29 @@ CONTENT_HINTS = (
     "movie",
     "episode",
     "vod",
+)
+
+VIDEO_URL_HINTS = (
+    "watch",
+    "video",
+    "videos",
+    "play",
+    "player",
+    "episode",
+    "vod",
+    "lecture",
+    "course",
+    "media",
+)
+
+VIDEO_TEXT_HINTS = (
+    "watch",
+    "video",
+    "play",
+    "episode",
+    "lecture",
+    "lesson",
+    "view",
 )
 
 
@@ -134,3 +158,36 @@ def is_short_duration_only_ad(candidate: StreamCandidate) -> bool:
         and is_likely_ad(candidate)
         and not has_ad_markers(candidate)
     )
+
+
+def score_link(url: str, text: str, has_thumbnail: bool, *, is_ad_url: bool) -> int:
+    if is_ad_url:
+        return -100
+
+    parsed = urlparse(url)
+    haystack = " ".join([parsed.path, parsed.query, text]).lower()
+    score = 0
+    if has_thumbnail:
+        score += 6
+    for hint in VIDEO_URL_HINTS:
+        if hint in haystack:
+            score += 2
+    for hint in VIDEO_TEXT_HINTS:
+        if hint in text.lower():
+            score += 1
+    if re.search(r"/(?:watch|video|videos|episode|lecture|lesson)s?[/=?-]", haystack):
+        score += 4
+    if parsed.fragment:
+        score -= 1
+    if parsed.scheme not in {"http", "https"}:
+        score -= 10
+    return score
+
+
+def dedupe_links(candidates: list[LinkCandidate]) -> list[LinkCandidate]:
+    by_url: dict[str, LinkCandidate] = {}
+    for candidate in candidates:
+        existing = by_url.get(candidate.url)
+        if existing is None or candidate.score > existing.score:
+            by_url[candidate.url] = candidate
+    return sorted(by_url.values(), key=lambda item: item.score, reverse=True)

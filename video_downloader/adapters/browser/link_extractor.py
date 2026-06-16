@@ -1,76 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import re
-from dataclasses import dataclass
-from urllib.parse import urlparse
 
-from .browser_protection import install_popup_protection, looks_like_ad_popup_url
-
-
-VIDEO_URL_HINTS = (
-    "watch",
-    "video",
-    "videos",
-    "play",
-    "player",
-    "episode",
-    "vod",
-    "lecture",
-    "course",
-    "media",
+from .context import (
+    browser_launch_options,
+    desktop_context_options,
+    harden_context,
+    new_desktop_context,
 )
-
-VIDEO_TEXT_HINTS = (
-    "watch",
-    "video",
-    "play",
-    "episode",
-    "lecture",
-    "lesson",
-    "view",
-)
-
-
-@dataclass(frozen=True, slots=True)
-class LinkCandidate:
-    url: str
-    text: str = ""
-    has_thumbnail: bool = False
-    score: int = 0
-
-
-def score_link(url: str, text: str, has_thumbnail: bool) -> int:
-    if looks_like_ad_popup_url(url):
-        return -100
-
-    parsed = urlparse(url)
-    haystack = " ".join([parsed.path, parsed.query, text]).lower()
-    score = 0
-    if has_thumbnail:
-        score += 6
-    for hint in VIDEO_URL_HINTS:
-        if hint in haystack:
-            score += 2
-    for hint in VIDEO_TEXT_HINTS:
-        if hint in text.lower():
-            score += 1
-    if re.search(r"/(?:watch|video|videos|episode|lecture|lesson)s?[/=?-]", haystack):
-        score += 4
-    if parsed.fragment:
-        score -= 1
-    if parsed.scheme not in {"http", "https"}:
-        score -= 10
-    return score
-
-
-def dedupe_links(candidates: list[LinkCandidate]) -> list[LinkCandidate]:
-    by_url: dict[str, LinkCandidate] = {}
-    for candidate in candidates:
-        existing = by_url.get(candidate.url)
-        if existing is None or candidate.score > existing.score:
-            by_url[candidate.url] = candidate
-    return sorted(by_url.values(), key=lambda item: item.score, reverse=True)
+from .protection import install_popup_protection, looks_like_ad_popup_url
+from video_downloader.domain.models import LinkCandidate, ProxySettings
+from video_downloader.domain.scoring import dedupe_links, score_link
 
 
 async def _collect_link_rows(page) -> list[dict]:
@@ -175,6 +115,11 @@ async def _extract_links(
     min_score: int,
     wait_seconds: float,
     allow_popups: bool,
+    proxy_settings: ProxySettings | None,
+    user_data_dir: str | None,
+    browser_channel: str | None,
+    spoof_browser: bool,
+    block_devtool_detectors: bool,
     page_start: int | None,
     page_end: int | None,
 ) -> list[LinkCandidate]:
@@ -187,13 +132,48 @@ async def _extract_links(
         ) from exc
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
-        context = await browser.new_context(
-            user_agent=user_agent,
-            viewport={"width": 1365, "height": 900},
+        proxy_url = proxy_settings.proxy_url if proxy_settings else None
+        browser = None
+        if user_data_dir:
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir,
+                **browser_launch_options(
+                    headless=headless,
+                    proxy_url=proxy_url,
+                    browser_channel=browser_channel,
+                    spoof_browser=spoof_browser,
+                ),
+                **desktop_context_options(
+                    user_agent=user_agent,
+                    spoof_browser=spoof_browser,
+                ),
+            )
+            if spoof_browser:
+                await harden_context(context)
+        else:
+            browser = await p.chromium.launch(
+                **browser_launch_options(
+                    headless=headless,
+                    proxy_url=proxy_url,
+                    browser_channel=browser_channel,
+                    spoof_browser=spoof_browser,
+                )
+            )
+            context = await new_desktop_context(
+                browser,
+                user_agent=user_agent,
+                spoof_browser=spoof_browser,
+            )
+        await install_popup_protection(
+            context,
+            allow_popups=allow_popups,
+            block_devtool_detectors=block_devtool_detectors,
         )
-        await install_popup_protection(context, allow_popups=allow_popups)
-        page = await context.new_page()
+        page = (
+            context.pages[0]
+            if user_data_dir and context.pages
+            else await context.new_page()
+        )
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(int(wait_seconds * 1000))
@@ -208,7 +188,8 @@ async def _extract_links(
                 rows = await _collect_link_rows(page)
         finally:
             await context.close()
-            await browser.close()
+            if browser is not None:
+                await browser.close()
 
     candidates = []
     for row in rows:
@@ -217,7 +198,7 @@ async def _extract_links(
             continue
         text = row.get("text", "")
         has_thumbnail = bool(row.get("hasThumbnail"))
-        score = score_link(link_url, text, has_thumbnail)
+        score = score_link(link_url, text, has_thumbnail, is_ad_url=False)
         if score >= min_score:
             candidates.append(
                 LinkCandidate(
@@ -238,6 +219,11 @@ def extract_video_links(
     min_score: int = 6,
     wait_seconds: float = 3,
     allow_popups: bool = False,
+    proxy_settings: ProxySettings | None = None,
+    user_data_dir: str | None = None,
+    browser_channel: str | None = None,
+    spoof_browser: bool = False,
+    block_devtool_detectors: bool = False,
     page_start: int | None = None,
     page_end: int | None = None,
 ) -> list[LinkCandidate]:
@@ -249,7 +235,47 @@ def extract_video_links(
             min_score=min_score,
             wait_seconds=wait_seconds,
             allow_popups=allow_popups,
+            proxy_settings=proxy_settings,
+            user_data_dir=user_data_dir,
+            browser_channel=browser_channel,
+            spoof_browser=spoof_browser,
+            block_devtool_detectors=block_devtool_detectors,
             page_start=page_start,
             page_end=page_end,
         )
     )
+
+
+class PlaywrightLinkExtractor:
+    def extract_video_links(
+        self,
+        url: str,
+        *,
+        headless: bool = True,
+        user_agent: str | None = None,
+        min_score: int = 6,
+        wait_seconds: float = 3,
+        allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
+        spoof_browser: bool = False,
+        block_devtool_detectors: bool = False,
+        page_start: int | None = None,
+        page_end: int | None = None,
+    ) -> list[LinkCandidate]:
+        return extract_video_links(
+            url,
+            headless=headless,
+            user_agent=user_agent,
+            min_score=min_score,
+            wait_seconds=wait_seconds,
+            allow_popups=allow_popups,
+            proxy_settings=proxy_settings,
+            user_data_dir=user_data_dir,
+            browser_channel=browser_channel,
+            spoof_browser=spoof_browser,
+            block_devtool_detectors=block_devtool_detectors,
+            page_start=page_start,
+            page_end=page_end,
+        )

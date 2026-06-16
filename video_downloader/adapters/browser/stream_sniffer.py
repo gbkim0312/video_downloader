@@ -1,0 +1,593 @@
+from __future__ import annotations
+
+import asyncio
+import re
+import time
+import xml.etree.ElementTree as ET
+from collections.abc import Iterable
+from typing import Any
+from urllib.parse import urlparse
+
+from .context import (
+    browser_launch_options,
+    desktop_context_options,
+    harden_context,
+    new_desktop_context,
+)
+from .debug import BrowserDebugLog
+from .protection import install_popup_protection
+from video_downloader.domain.models import ProxySettings, StreamCandidate, SubtitleCandidate
+from video_downloader.domain.scoring import content_score
+
+
+STREAM_EXTENSIONS = (".m3u8", ".mpd", ".mp4", ".m4v", ".webm", ".mov")
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
+SUBTITLE_EXTENSIONS = (".srt", ".vtt", ".ass", ".ssa", ".ttml", ".dfxp")
+VIDEO_CONTENT_TYPES = (
+    "application/vnd.apple.mpegurl",
+    "application/x-mpegurl",
+    "application/dash+xml",
+    "video/",
+)
+IMAGE_CONTENT_TYPES = ("image/",)
+SUBTITLE_CONTENT_TYPES = (
+    "text/vtt",
+    "application/x-subrip",
+    "application/ttml+xml",
+    "application/x-ass",
+)
+
+
+def looks_like_stream(url: str, content_type: str = "") -> bool:
+    path = urlparse(url).path.lower().rstrip("/")
+    lower_type = content_type.lower()
+    if any(path.endswith(ext) for ext in IMAGE_EXTENSIONS) or any(
+        marker in lower_type for marker in IMAGE_CONTENT_TYPES
+    ):
+        return False
+    return any(path.endswith(ext) for ext in STREAM_EXTENSIONS) or any(
+        marker in lower_type for marker in VIDEO_CONTENT_TYPES
+    )
+
+
+def looks_like_subtitle(url: str, content_type: str = "") -> bool:
+    path = urlparse(url).path.lower().rstrip("/")
+    lower_type = content_type.lower()
+    return any(path.endswith(ext) for ext in SUBTITLE_EXTENSIONS) or any(
+        marker in lower_type for marker in SUBTITLE_CONTENT_TYPES
+    )
+
+
+def subtitle_extension(url: str, content_type: str = "") -> str:
+    path = urlparse(url).path.lower().rstrip("/")
+    for extension in SUBTITLE_EXTENSIONS:
+        if path.endswith(extension):
+            return extension.lstrip(".")
+    lower_type = content_type.lower()
+    if "vtt" in lower_type:
+        return "vtt"
+    if "ttml" in lower_type:
+        return "ttml"
+    if "ass" in lower_type:
+        return "ass"
+    return "srt"
+
+
+def parse_content_length(headers: dict[str, str]) -> int | None:
+    value = headers.get("content-length") or headers.get("Content-Length")
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def parse_hls_duration(text: str) -> float | None:
+    durations = [float(match) for match in re.findall(r"#EXTINF:([0-9.]+)", text)]
+    if durations:
+        return sum(durations)
+    return None
+
+
+def parse_iso8601_duration(value: str) -> float | None:
+    match = re.fullmatch(
+        r"P(?:(?P<days>\d+(?:\.\d+)?)D)?"
+        r"(?:T(?:(?P<hours>\d+(?:\.\d+)?)H)?"
+        r"(?:(?P<minutes>\d+(?:\.\d+)?)M)?"
+        r"(?:(?P<seconds>\d+(?:\.\d+)?)S)?)?",
+        value,
+    )
+    if not match:
+        return None
+    days = float(match.group("days") or 0)
+    hours = float(match.group("hours") or 0)
+    minutes = float(match.group("minutes") or 0)
+    seconds = float(match.group("seconds") or 0)
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def parse_dash_duration(text: str) -> float | None:
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    duration = root.attrib.get("mediaPresentationDuration")
+    if duration:
+        return parse_iso8601_duration(duration)
+    return None
+
+
+def dedupe_candidates(candidates: Iterable[StreamCandidate]) -> list[StreamCandidate]:
+    by_url: dict[str, StreamCandidate] = {}
+    for candidate in candidates:
+        existing = by_url.get(candidate.url)
+        if existing is None:
+            by_url[candidate.url] = candidate
+            continue
+        if existing.duration is None and candidate.duration is not None:
+            existing.duration = candidate.duration
+        if existing.byte_length is None and candidate.byte_length is not None:
+            existing.byte_length = candidate.byte_length
+        if not existing.manifest_text and candidate.manifest_text:
+            existing.manifest_text = candidate.manifest_text
+    return list(by_url.values())
+
+
+def dedupe_subtitles(candidates: Iterable[SubtitleCandidate]) -> list[SubtitleCandidate]:
+    by_url: dict[str, SubtitleCandidate] = {}
+    for candidate in candidates:
+        existing = by_url.get(candidate.url)
+        if existing is None:
+            by_url[candidate.url] = candidate
+            continue
+        if not existing.page_title and candidate.page_title:
+            existing.page_title = candidate.page_title
+    return list(by_url.values())
+
+
+def cookie_header_for_host(cookies: list[dict[str, Any]], host: str) -> str:
+    values = []
+    normalized_host = host.lower()
+    for cookie in cookies:
+        domain = str(cookie.get("domain", "")).lstrip(".").lower()
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not domain or not name:
+            continue
+        if normalized_host == domain or normalized_host.endswith(f".{domain}"):
+            values.append(f"{name}={value}")
+    return "; ".join(values)
+
+
+class BrowserStreamSniffer:
+    def __init__(
+        self,
+        *,
+        headless: bool = True,
+        user_agent: str | None = None,
+        play_seconds: float = 25,
+        allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
+        auto_click: bool = True,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
+        spoof_browser: bool = False,
+        restore_blank: bool = True,
+        block_devtool_detectors: bool = False,
+        debug_log_path: str | None = None,
+    ) -> None:
+        self.headless = headless
+        self.user_agent = user_agent
+        self.play_seconds = play_seconds
+        self.allow_popups = allow_popups
+        self.proxy_settings = proxy_settings
+        self.auto_click = auto_click
+        self.user_data_dir = user_data_dir
+        self.browser_channel = browser_channel
+        self.spoof_browser = spoof_browser
+        self.restore_blank = restore_blank
+        self.block_devtool_detectors = block_devtool_detectors
+        self.debug_log_path = debug_log_path
+        self.debug_log = BrowserDebugLog(debug_log_path) if debug_log_path else None
+        self._debug_attached_pages: set[int] = set()
+
+    async def sniff(
+        self,
+        url: str,
+        *,
+        subtitle_candidates: list[SubtitleCandidate] | None = None,
+    ) -> list[StreamCandidate]:
+        try:
+            from playwright.async_api import async_playwright
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Missing dependency: playwright. Install with `pip install -e .` "
+                "and run `python -m playwright install chromium`."
+            ) from exc
+
+        started = time.monotonic()
+        candidates: list[StreamCandidate] = []
+        subtitles: list[SubtitleCandidate] = []
+        pending: set[asyncio.Task[None]] = set()
+        observed_pages: list[Any] = []
+
+        async with async_playwright() as p:
+            proxy_url = self.proxy_settings.proxy_url if self.proxy_settings else None
+            browser = None
+            if self.user_data_dir:
+                context = await p.chromium.launch_persistent_context(
+                    self.user_data_dir,
+                    **browser_launch_options(
+                        headless=self.headless,
+                        proxy_url=proxy_url,
+                        browser_channel=self.browser_channel,
+                        spoof_browser=self.spoof_browser,
+                    ),
+                    **desktop_context_options(
+                        user_agent=self.user_agent,
+                        spoof_browser=self.spoof_browser,
+                    ),
+                )
+                if self.spoof_browser:
+                    await harden_context(context)
+            else:
+                browser = await p.chromium.launch(
+                    **browser_launch_options(
+                        headless=self.headless,
+                        proxy_url=proxy_url,
+                        browser_channel=self.browser_channel,
+                        spoof_browser=self.spoof_browser,
+                    )
+                )
+                context = await new_desktop_context(
+                    browser,
+                    user_agent=self.user_agent,
+                    spoof_browser=self.spoof_browser,
+                )
+            await install_popup_protection(
+                context,
+                allow_popups=self.allow_popups,
+                block_devtool_detectors=self.block_devtool_detectors,
+                debug_log=self.debug_log,
+            )
+
+            def schedule(response: Any) -> None:
+                task = asyncio.create_task(
+                    self._handle_response(response, candidates, subtitles, started)
+                )
+                pending.add(task)
+                task.add_done_callback(pending.discard)
+
+            def attach_page(page: Any) -> None:
+                if page not in observed_pages:
+                    observed_pages.append(page)
+                page.on("response", schedule)
+                self._attach_debug(page)
+
+            context.on("page", attach_page)
+            page = (
+                context.pages[0]
+                if self.user_data_dir and context.pages
+                else await context.new_page()
+            )
+            attach_page(page)
+            await self._open_and_play(page, url)
+            await asyncio.sleep(self.play_seconds)
+
+            if pending:
+                await asyncio.wait(pending, timeout=10)
+
+            page_title = await self._page_title(observed_pages)
+            if page_title:
+                for candidate in candidates:
+                    if not candidate.page_title:
+                        candidate.page_title = page_title
+                for candidate in subtitles:
+                    if not candidate.page_title:
+                        candidate.page_title = page_title
+            cookies = await context.cookies()
+            for candidate in candidates:
+                if "cookie" not in candidate.request_headers:
+                    cookie_header = cookie_header_for_host(cookies, candidate.host)
+                    if cookie_header:
+                        candidate.request_headers["cookie"] = cookie_header
+            for candidate in subtitles:
+                if "cookie" not in candidate.request_headers:
+                    cookie_header = cookie_header_for_host(cookies, candidate.host)
+                    if cookie_header:
+                        candidate.request_headers["cookie"] = cookie_header
+
+            await self._close(context, browser)
+
+        if subtitle_candidates is not None:
+            subtitle_candidates.extend(dedupe_subtitles(subtitles))
+        unique = dedupe_candidates(candidates)
+        return sorted(unique, key=content_score, reverse=True)
+
+    async def _page_title(self, pages: list[Any]) -> str:
+        for page in reversed(pages):
+            try:
+                if page.is_closed() or page.url == "about:blank":
+                    continue
+                title = (await page.title()).strip()
+                if title:
+                    return title
+            except Exception:
+                continue
+        return ""
+
+    def _attach_debug(self, page: Any) -> None:
+        if not self.debug_log:
+            return
+        page_id = id(page)
+        if page_id in self._debug_attached_pages:
+            return
+        self._debug_attached_pages.add(page_id)
+        self.debug_log.event(
+            "page_attached",
+            page_id=page_id,
+            url=getattr(page, "url", ""),
+        )
+
+        async def log_navigation(frame: Any) -> None:
+            try:
+                if frame == page.main_frame:
+                    self.debug_log.event(
+                        "main_frame_navigated",
+                        page_id=page_id,
+                        url=frame.url,
+                    )
+            except Exception as exc:
+                self.debug_log.event(
+                    "debug_listener_error",
+                    page_id=page_id,
+                    error=exc,
+                )
+
+        def on_console(message: Any) -> None:
+            try:
+                self.debug_log.event(
+                    "console",
+                    page_id=page_id,
+                    type=message.type,
+                    text=message.text,
+                )
+            except Exception:
+                pass
+
+        def on_page_error(error: Any) -> None:
+            self.debug_log.event("page_error", page_id=page_id, error=error)
+
+        def on_request_failed(request: Any) -> None:
+            try:
+                failure = request.failure or {}
+                self.debug_log.event(
+                    "request_failed",
+                    page_id=page_id,
+                    url=request.url,
+                    resource_type=request.resource_type,
+                    error=failure.get("errorText", ""),
+                )
+            except Exception:
+                pass
+
+        page.on(
+            "framenavigated",
+            lambda frame: asyncio.create_task(log_navigation(frame)),
+        )
+        page.on("console", on_console)
+        page.on("pageerror", on_page_error)
+        page.on("requestfailed", on_request_failed)
+        page.on(
+            "close",
+            lambda: self.debug_log.event("page_closed", page_id=page_id),
+        )
+
+    async def _open_and_play(self, page: Any, url: str) -> None:
+        try:
+            if self.debug_log:
+                self.debug_log.event("goto_start", url=url)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            if self.debug_log:
+                self.debug_log.event("goto_done", url=page.url)
+        except Exception:
+            if self.debug_log:
+                self.debug_log.event("goto_failed", url=url)
+            return
+        await asyncio.sleep(1.5)
+        await self._restore_blank_page(page, url)
+        if not self.auto_click:
+            return
+
+        selectors = [
+            'button[aria-label*="Play" i]',
+            'button[title*="Play" i]',
+            '[role="button"][aria-label*="Play" i]',
+            "video",
+        ]
+        for selector in selectors:
+            try:
+                element = page.locator(selector).first
+                if await element.count():
+                    await element.click(timeout=1500, force=True)
+                    await page.wait_for_timeout(1000)
+                    await self._restore_blank_page(page, url)
+            except Exception:
+                pass
+
+        if self.headless:
+            try:
+                await page.keyboard.press("Space")
+                await self._restore_blank_page(page, url)
+            except Exception:
+                pass
+
+            try:
+                box = page.viewport_size or {"width": 1365, "height": 900}
+                await page.mouse.click(box["width"] / 2, box["height"] / 2)
+                await self._restore_blank_page(page, url)
+            except Exception:
+                pass
+
+    async def _restore_blank_page(self, page: Any, url: str) -> None:
+        if not self.restore_blank or page.url != "about:blank":
+            return
+        if not self.headless:
+            return
+        try:
+            if self.debug_log:
+                self.debug_log.event("blank_restore_start", url=url)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(1000)
+            if self.debug_log:
+                self.debug_log.event("blank_restore_done", url=page.url)
+        except Exception:
+            if self.debug_log:
+                self.debug_log.event("blank_restore_failed", url=url)
+            pass
+
+    async def _handle_response(
+        self,
+        response: Any,
+        candidates: list[StreamCandidate],
+        subtitles: list[SubtitleCandidate],
+        started: float,
+    ) -> None:
+        headers = await response.all_headers()
+        content_type = headers.get("content-type", "")
+        request = response.request
+        request_headers = await request.all_headers()
+        if looks_like_subtitle(response.url, content_type):
+            if self.debug_log:
+                self.debug_log.event(
+                    "subtitle_candidate_seen",
+                    url=response.url,
+                    content_type=content_type,
+                    status=response.status,
+                )
+            subtitles.append(
+                SubtitleCandidate(
+                    url=response.url,
+                    content_type=content_type,
+                    extension=subtitle_extension(response.url, content_type),
+                    discovered_at=time.monotonic() - started,
+                    request_headers=request_headers,
+                    response_headers=headers,
+                )
+            )
+            return
+
+        if not looks_like_stream(response.url, content_type):
+            return
+        if self.debug_log:
+            self.debug_log.event(
+                "stream_candidate_seen",
+                url=response.url,
+                content_type=content_type,
+                status=response.status,
+            )
+
+        if request.resource_type == "image":
+            return
+        candidate = StreamCandidate(
+            url=response.url,
+            content_type=content_type,
+            method=request.method,
+            resource_type=request.resource_type,
+            referer=request_headers.get("referer", ""),
+            user_agent=request_headers.get("user-agent", ""),
+            byte_length=parse_content_length(headers),
+            discovered_at=time.monotonic() - started,
+            request_headers=request_headers,
+            response_headers=headers,
+        )
+
+        if candidate.kind in {"hls", "dash"}:
+            try:
+                text = await response.text()
+            except Exception:
+                text = ""
+            candidate.manifest_text = text
+            if candidate.kind == "hls":
+                candidate.duration = parse_hls_duration(text)
+            elif candidate.kind == "dash":
+                candidate.duration = parse_dash_duration(text)
+
+        candidates.append(candidate)
+
+    async def _close(self, context: Any, browser: Any) -> None:
+        await context.close()
+        if browser is not None:
+            await browser.close()
+
+
+def sniff_streams(
+    url: str,
+    *,
+    headless: bool = True,
+    user_agent: str | None = None,
+    play_seconds: float = 25,
+    allow_popups: bool = False,
+    proxy_settings: ProxySettings | None = None,
+    auto_click: bool = True,
+    user_data_dir: str | None = None,
+    browser_channel: str | None = None,
+    spoof_browser: bool = False,
+    restore_blank: bool = True,
+    block_devtool_detectors: bool = False,
+    debug_log_path: str | None = None,
+    subtitle_candidates: list[SubtitleCandidate] | None = None,
+) -> list[StreamCandidate]:
+    sniffer = BrowserStreamSniffer(
+        headless=headless,
+        user_agent=user_agent,
+        play_seconds=play_seconds,
+        allow_popups=allow_popups,
+        proxy_settings=proxy_settings,
+        auto_click=auto_click,
+        user_data_dir=user_data_dir,
+        browser_channel=browser_channel,
+        spoof_browser=spoof_browser,
+        restore_blank=restore_blank,
+        block_devtool_detectors=block_devtool_detectors,
+        debug_log_path=debug_log_path,
+    )
+    return asyncio.run(sniffer.sniff(url, subtitle_candidates=subtitle_candidates))
+
+
+class PlaywrightStreamSniffer:
+    def sniff_streams(
+        self,
+        url: str,
+        *,
+        headless: bool = True,
+        user_agent: str | None = None,
+        play_seconds: float = 25,
+        allow_popups: bool = False,
+        proxy_settings: ProxySettings | None = None,
+        auto_click: bool = True,
+        user_data_dir: str | None = None,
+        browser_channel: str | None = None,
+        spoof_browser: bool = False,
+        restore_blank: bool = True,
+        block_devtool_detectors: bool = False,
+        debug_log_path: str | None = None,
+        subtitle_candidates: list[SubtitleCandidate] | None = None,
+    ) -> list[StreamCandidate]:
+        return sniff_streams(
+            url,
+            headless=headless,
+            user_agent=user_agent,
+            play_seconds=play_seconds,
+            allow_popups=allow_popups,
+            proxy_settings=proxy_settings,
+            auto_click=auto_click,
+            user_data_dir=user_data_dir,
+            browser_channel=browser_channel,
+            spoof_browser=spoof_browser,
+            restore_blank=restore_blank,
+            block_devtool_detectors=block_devtool_detectors,
+            debug_log_path=debug_log_path,
+            subtitle_candidates=subtitle_candidates,
+        )
