@@ -73,6 +73,61 @@ def dedupe_links(candidates: list[LinkCandidate]) -> list[LinkCandidate]:
     return sorted(by_url.values(), key=lambda item: item.score, reverse=True)
 
 
+async def _collect_link_rows(page) -> list[dict]:
+    return await page.locator("a[href]").evaluate_all(
+        """anchors => anchors.map(anchor => {
+            const text = (anchor.innerText || anchor.getAttribute('aria-label') || anchor.title || '').trim();
+            const image = anchor.querySelector('img, picture, video, [style*="background-image"]');
+            const nearbyImage = anchor.closest('article, li, div')?.querySelector('img, picture, video, [style*="background-image"]');
+            return {
+                url: anchor.href,
+                text,
+                hasThumbnail: Boolean(image || nearbyImage),
+            };
+        })"""
+    )
+
+
+async def _click_page_number(page, page_number: int) -> None:
+    page_text = str(page_number)
+    locator = page.locator("a, button, [role=button], [role=link]").filter(
+        has_text=page_text
+    )
+    count = await locator.count()
+    for index in range(count):
+        item = locator.nth(index)
+        try:
+            text = (await item.inner_text(timeout=1000)).strip()
+            if text != page_text or not await item.is_visible():
+                continue
+            await item.scroll_into_view_if_needed(timeout=2000)
+            await item.click(timeout=5000)
+            return
+        except Exception:
+            continue
+    raise ValueError(f"could not find clickable page number: {page_number}")
+
+
+async def _collect_paginated_link_rows(
+    page,
+    *,
+    page_start: int,
+    page_end: int,
+    wait_seconds: float,
+) -> list[dict]:
+    rows: list[dict] = []
+    if page_start > 1:
+        await _click_page_number(page, page_start)
+        await page.wait_for_timeout(int(wait_seconds * 1000))
+
+    for page_number in range(page_start, page_end + 1):
+        rows.extend(await _collect_link_rows(page))
+        if page_number < page_end:
+            await _click_page_number(page, page_number + 1)
+            await page.wait_for_timeout(int(wait_seconds * 1000))
+    return rows
+
+
 async def _extract_links(
     url: str,
     *,
@@ -81,6 +136,8 @@ async def _extract_links(
     min_score: int,
     wait_seconds: float,
     allow_popups: bool,
+    page_start: int | None,
+    page_end: int | None,
 ) -> list[LinkCandidate]:
     try:
         from playwright.async_api import async_playwright
@@ -101,18 +158,15 @@ async def _extract_links(
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(int(wait_seconds * 1000))
-            rows = await page.locator("a[href]").evaluate_all(
-                """anchors => anchors.map(anchor => {
-                    const text = (anchor.innerText || anchor.getAttribute('aria-label') || anchor.title || '').trim();
-                    const image = anchor.querySelector('img, picture, video, [style*="background-image"]');
-                    const nearbyImage = anchor.closest('article, li, div')?.querySelector('img, picture, video, [style*="background-image"]');
-                    return {
-                        url: anchor.href,
-                        text,
-                        hasThumbnail: Boolean(image || nearbyImage),
-                    };
-                })"""
-            )
+            if page_start is not None and page_end is not None:
+                rows = await _collect_paginated_link_rows(
+                    page,
+                    page_start=page_start,
+                    page_end=page_end,
+                    wait_seconds=wait_seconds,
+                )
+            else:
+                rows = await _collect_link_rows(page)
         finally:
             await context.close()
             await browser.close()
@@ -145,6 +199,8 @@ def extract_video_links(
     min_score: int = 6,
     wait_seconds: float = 3,
     allow_popups: bool = False,
+    page_start: int | None = None,
+    page_end: int | None = None,
 ) -> list[LinkCandidate]:
     return asyncio.run(
         _extract_links(
@@ -154,5 +210,7 @@ def extract_video_links(
             min_score=min_score,
             wait_seconds=wait_seconds,
             allow_popups=allow_popups,
+            page_start=page_start,
+            page_end=page_end,
         )
     )

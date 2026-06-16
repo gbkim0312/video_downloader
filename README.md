@@ -143,6 +143,13 @@ video-dl "https://example.com/playlist/abc" -x --links-output sites.txt
 video-dl -i sites.txt -j 3
 ```
 
+페이지 이동 없이 목록만 바뀌는 페이지네이션은 페이지 번호 범위를 지정해 차례로 클릭하며 추출할 수 있습니다.
+옵션을 주지 않으면 기존처럼 현재 보이는 페이지만 추출합니다.
+
+```bash
+video-dl "https://example.com/playlist/abc" -x --link-page-start 1 --link-page-end 5 -L sites.txt
+```
+
 링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 명확한 광고/팝업 URL은 제외합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
 
 ## 자주 쓰는 옵션
@@ -160,6 +167,8 @@ video-dl -i sites.txt -j 3
 | `--no-fallback` | 브라우저 감지 실패 시 `yt-dlp` fallback 끄기 |
 | `-s`, `--play-seconds` | 브라우저 감지 대기 시간 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
+| `-L`, `--links-output` | 추출한 링크를 저장할 텍스트 파일 |
+| `--link-page-start`, `--link-page-end` | 링크 추출 시 클릭할 페이지 번호 범위 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |
 | `--allow-popups` | 새 탭/팝업 자동 차단 끄기 |

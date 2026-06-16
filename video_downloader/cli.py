@@ -170,6 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extract likely video page links from a playlist/index page instead of downloading.",
     )
     parser.add_argument(
+        "-L",
         "--links-output",
         default=None,
         help="Write extracted video links to this text file.",
@@ -185,6 +186,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=3,
         help="Seconds to wait after opening a link extraction page.",
+    )
+    parser.add_argument(
+        "--link-page-start",
+        type=int,
+        default=None,
+        help="First pagination page number to click and extract when using --extract-links.",
+    )
+    parser.add_argument(
+        "--link-page-end",
+        type=int,
+        default=None,
+        help="Last pagination page number to click and extract when using --extract-links.",
     )
     return parser
 
@@ -446,6 +459,20 @@ def run_link_extraction(args: argparse.Namespace) -> int:
             "and run `python -m playwright install chromium`."
         ) from exc
 
+    page_start = args.link_page_start
+    page_end = args.link_page_end
+    if page_start is None and page_end is not None:
+        page_start = page_end
+    elif page_start is not None and page_end is None:
+        page_end = page_start
+
+    if page_start is not None and page_start < 1:
+        raise ValueError("--link-page-start must be at least 1")
+    if page_end is not None and page_end < 1:
+        raise ValueError("--link-page-end must be at least 1")
+    if page_start is not None and page_end is not None and page_start > page_end:
+        raise ValueError("--link-page-start must be less than or equal to --link-page-end")
+
     if not args.quiet:
         browser_mode = "headed Chromium" if args.headed else "headless Chromium"
         print(f"Opening page with {browser_mode}; extracting video links...")
@@ -457,6 +484,8 @@ def run_link_extraction(args: argparse.Namespace) -> int:
         min_score=args.link_min_score,
         wait_seconds=args.link_wait_seconds,
         allow_popups=args.allow_popups,
+        page_start=page_start,
+        page_end=page_end,
     )
 
     if args.links_output:
