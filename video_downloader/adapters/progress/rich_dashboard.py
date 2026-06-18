@@ -84,6 +84,9 @@ class DashboardProgressReporter:
         with self._lock:
             state = self._state_from_message(text)
             if label != "batch" and state:
+                if state == "queued":
+                    self.close_bar(label)
+                    return
                 self._job_for(label).state = state
                 self._refresh()
             message = self._deferred_message(label, text)
