@@ -13,6 +13,9 @@ from video_downloader.domain.models import LinkCandidate, ProxySettings
 from video_downloader.domain.scoring import dedupe_links, score_link
 
 
+LINK_POLL_INTERVAL_SECONDS = 0.25
+
+
 async def _collect_link_rows(page) -> list[dict]:
     return await page.locator("a[href]").evaluate_all(
         """anchors => anchors.map(anchor => {
@@ -26,6 +29,82 @@ async def _collect_link_rows(page) -> list[dict]:
             };
         })"""
     )
+
+
+def _rows_signature(rows: list[dict]) -> tuple[str, ...]:
+    return tuple(
+        f"{row.get('url', '')}\n{row.get('text', '')}"
+        for row in rows
+    )
+
+
+async def _collect_stable_link_rows(page, wait_seconds: float) -> list[dict]:
+    deadline = asyncio.get_running_loop().time() + max(wait_seconds, 1.0)
+    previous_signature: tuple[str, ...] | None = None
+    latest_rows: list[dict] = []
+
+    while True:
+        latest_rows = await _collect_link_rows(page)
+        signature = _rows_signature(latest_rows)
+        if signature and signature == previous_signature:
+            return latest_rows
+        if asyncio.get_running_loop().time() >= deadline:
+            return latest_rows
+        previous_signature = signature
+        await page.wait_for_timeout(int(LINK_POLL_INTERVAL_SECONDS * 1000))
+
+
+async def _wait_for_link_change(
+    page,
+    previous_signature: tuple[str, ...],
+    wait_seconds: float,
+) -> list[dict]:
+    try:
+        await page.wait_for_load_state("networkidle", timeout=1500)
+    except Exception:
+        pass
+
+    deadline = asyncio.get_running_loop().time() + max(wait_seconds, 1.0)
+    latest_rows: list[dict] = []
+    while True:
+        latest_rows = await _collect_stable_link_rows(
+            page,
+            min(wait_seconds, LINK_POLL_INTERVAL_SECONDS * 2),
+        )
+        signature = _rows_signature(latest_rows)
+        if signature and signature != previous_signature:
+            return latest_rows
+        if asyncio.get_running_loop().time() >= deadline:
+            return latest_rows
+        await page.wait_for_timeout(int(LINK_POLL_INTERVAL_SECONDS * 1000))
+
+
+async def _advance_to_page(
+    page,
+    page_number: int,
+    previous_signature: tuple[str, ...],
+    wait_seconds: float,
+) -> tuple[str, ...]:
+    signature = previous_signature
+    for _ in range(max(10, page_number + 2)):
+        if await _click_page_number(page, page_number):
+            rows = await _wait_for_link_change(page, signature, wait_seconds)
+            next_signature = _rows_signature(rows)
+            if next_signature and next_signature != signature:
+                return next_signature
+
+        if not await _click_next_page(page):
+            return signature
+
+        rows = await _wait_for_link_change(page, signature, wait_seconds)
+        next_signature = _rows_signature(rows)
+        if next_signature and next_signature != signature:
+            if previous_signature:
+                return next_signature
+            signature = next_signature
+            continue
+        signature = next_signature
+    return signature
 
 
 async def _is_disabled(item) -> bool:
@@ -93,17 +172,26 @@ async def _collect_paginated_link_rows(
 ) -> list[dict]:
     rows: list[dict] = []
     if page_start > 1:
-        if not await _click_page_number(page, page_start):
+        start_signature = await _advance_to_page(page, page_start, (), wait_seconds)
+        if not start_signature:
             raise ValueError(f"could not find clickable page number: {page_start}")
-        await page.wait_for_timeout(int(wait_seconds * 1000))
 
+    previous_signature: tuple[str, ...] | None = None
     for page_number in range(page_start, page_end + 1):
-        rows.extend(await _collect_link_rows(page))
+        current_rows = await _collect_stable_link_rows(page, wait_seconds)
+        current_signature = _rows_signature(current_rows)
+        if current_signature and current_signature != previous_signature:
+            rows.extend(current_rows)
+        previous_signature = current_signature
         if page_number < page_end:
-            if not await _click_page_number(page, page_number + 1):
-                if not await _click_next_page(page):
-                    break
-            await page.wait_for_timeout(int(wait_seconds * 1000))
+            next_signature = await _advance_to_page(
+                page,
+                page_number + 1,
+                current_signature,
+                wait_seconds,
+            )
+            if next_signature == current_signature:
+                break
     return rows
 
 
@@ -185,7 +273,7 @@ async def _extract_links(
                     wait_seconds=wait_seconds,
                 )
             else:
-                rows = await _collect_link_rows(page)
+                rows = await _collect_stable_link_rows(page, wait_seconds)
         finally:
             await context.close()
             if browser is not None:
