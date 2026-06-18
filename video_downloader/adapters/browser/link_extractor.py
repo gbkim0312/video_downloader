@@ -157,60 +157,146 @@ async def _advance_to_page(
     return signature
 
 
-async def _is_disabled(item) -> bool:
-    aria_disabled = await item.get_attribute("aria-disabled")
-    disabled = await item.get_attribute("disabled")
-    class_name = (await item.get_attribute("class")) or ""
-    return (
-        aria_disabled == "true"
-        or disabled is not None
-        or "disabled" in class_name.lower()
-    )
-
-
 async def _click_page_number(page, page_number: int) -> bool:
-    page_text = str(page_number)
-    locator = page.locator("a, button, [role=button], [role=link]").filter(
-        has_text=page_text
+    return bool(
+        await page.evaluate(
+            """target => {
+                const normalize = value => (value || '').replace(/\\s+/g, ' ').trim();
+                const isVisible = element => {
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.visibility !== 'hidden' &&
+                        style.display !== 'none' &&
+                        rect.width > 0 &&
+                        rect.height > 0;
+                };
+                const isDisabled = element => {
+                    const className = (element.getAttribute('class') || '').toLowerCase();
+                    return element.disabled ||
+                        element.getAttribute('aria-disabled') === 'true' ||
+                        className.includes('disabled');
+                };
+                const inPagination = element => Boolean(
+                    element.closest(
+                        'nav, [role="navigation"], .pagination, .paging, .pager, ' +
+                        '.page, .pages, .paginate, .pagenation, .page-numbers, ' +
+                        '[class*="pagination"], [class*="paging"], [class*="pager"]'
+                    )
+                );
+                const pagePattern = new RegExp(
+                    '(^|[^0-9])' + target + '([^0-9]|$)'
+                );
+                const hrefPattern = new RegExp(
+                    '(page|paged|p|page_no|pageNo|page_num|pageNum)(=|/)' + target + '([^0-9]|$)?',
+                    'i'
+                );
+                const candidates = Array.from(
+                    document.querySelectorAll('a, button, [role="button"], [role="link"]')
+                );
+                const matches = [];
+                for (const element of candidates) {
+                    if (!isVisible(element) || isDisabled(element)) {
+                        continue;
+                    }
+                    const text = normalize(element.textContent);
+                    const aria = normalize(element.getAttribute('aria-label'));
+                    const title = normalize(element.getAttribute('title'));
+                    const dataPage = normalize(element.getAttribute('data-page'));
+                    const href = element.getAttribute('href') || '';
+                    const label = [text, aria, title, dataPage].filter(Boolean).join(' ');
+                    const exact = [text, aria, title, dataPage].includes(target);
+                    const labelledPage = pagePattern.test(label) &&
+                        /(page|페이지|쪽|p\\.?)/i.test(label);
+                    const hrefPage = hrefPattern.test(href);
+                    if (!exact && !labelledPage && !hrefPage) {
+                        continue;
+                    }
+                    matches.push({
+                        element,
+                        score:
+                            (inPagination(element) ? 100 : 0) +
+                            (exact ? 20 : 0) +
+                            (labelledPage ? 10 : 0) +
+                            (hrefPage ? 5 : 0),
+                    });
+                }
+                matches.sort((left, right) => right.score - left.score);
+                if (!matches.length) {
+                    return false;
+                }
+                matches[0].element.scrollIntoView({block: 'center', inline: 'center'});
+                matches[0].element.click();
+                return true;
+            }""",
+            str(page_number),
+        )
     )
-    count = await locator.count()
-    for index in range(count):
-        item = locator.nth(index)
-        try:
-            text = (await item.inner_text(timeout=1000)).strip()
-            if text != page_text or not await item.is_visible():
-                continue
-            if await _is_disabled(item):
-                continue
-            await item.scroll_into_view_if_needed(timeout=2000)
-            await item.click(timeout=5000)
-            return True
-        except Exception:
-            continue
-    return False
 
 
 async def _click_next_page(page) -> bool:
-    next_labels = ("next", "다음", ">", "›", "»")
-    locator = page.locator("a, button, [role=button], [role=link]")
-    count = await locator.count()
-    for index in range(count):
-        item = locator.nth(index)
-        try:
-            if not await item.is_visible() or await _is_disabled(item):
-                continue
-            text = (await item.inner_text(timeout=1000)).strip()
-            aria_label = (await item.get_attribute("aria-label")) or ""
-            title = (await item.get_attribute("title")) or ""
-            label = " ".join([text, aria_label, title]).strip().lower()
-            if not any(next_label in label for next_label in next_labels):
-                continue
-            await item.scroll_into_view_if_needed(timeout=2000)
-            await item.click(timeout=5000)
-            return True
-        except Exception:
-            continue
-    return False
+    return bool(
+        await page.evaluate(
+            """() => {
+                const normalize = value => (value || '').replace(/\\s+/g, ' ').trim();
+                const isVisible = element => {
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.visibility !== 'hidden' &&
+                        style.display !== 'none' &&
+                        rect.width > 0 &&
+                        rect.height > 0;
+                };
+                const isDisabled = element => {
+                    const className = (element.getAttribute('class') || '').toLowerCase();
+                    return element.disabled ||
+                        element.getAttribute('aria-disabled') === 'true' ||
+                        className.includes('disabled');
+                };
+                const inPagination = element => Boolean(
+                    element.closest(
+                        'nav, [role="navigation"], .pagination, .paging, .pager, ' +
+                        '.page, .pages, .paginate, .pagenation, .page-numbers, ' +
+                        '[class*="pagination"], [class*="paging"], [class*="pager"]'
+                    )
+                );
+                const candidates = Array.from(
+                    document.querySelectorAll('a, button, [role="button"], [role="link"]')
+                );
+                const matches = [];
+                for (const element of candidates) {
+                    if (!isVisible(element) || isDisabled(element)) {
+                        continue;
+                    }
+                    const text = normalize(element.textContent).toLowerCase();
+                    const aria = normalize(element.getAttribute('aria-label')).toLowerCase();
+                    const title = normalize(element.getAttribute('title')).toLowerCase();
+                    const rel = normalize(element.getAttribute('rel')).toLowerCase();
+                    const className = normalize(element.getAttribute('class')).toLowerCase();
+                    const label = [text, aria, title, rel, className].filter(Boolean).join(' ');
+                    const exact = ['next', '다음', '>', '›', '»'].includes(text);
+                    const labelledNext = /(next|다음|forward|right|angle-right|chevron-right)/i.test(label);
+                    if (!exact && !labelledNext) {
+                        continue;
+                    }
+                    matches.push({
+                        element,
+                        score:
+                            (inPagination(element) ? 100 : 0) +
+                            (rel === 'next' ? 30 : 0) +
+                            (exact ? 20 : 0) +
+                            (labelledNext ? 10 : 0),
+                    });
+                }
+                matches.sort((left, right) => right.score - left.score);
+                if (!matches.length) {
+                    return false;
+                }
+                matches[0].element.scrollIntoView({block: 'center', inline: 'center'});
+                matches[0].element.click();
+                return true;
+            }"""
+        )
+    )
 
 
 async def _collect_paginated_link_rows(
