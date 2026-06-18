@@ -22,6 +22,7 @@ class LinkExtractionOptions:
     block_devtool_detectors: bool = False
     page_start: int | None = None
     page_end: int | None = None
+    debug: bool = False
 
 
 class LinkExtractionService:
@@ -54,6 +55,7 @@ class LinkExtractionService:
             block_devtool_detectors=options.block_devtool_detectors,
             page_start=options.page_start,
             page_end=options.page_end,
+            debug=options.debug,
         )
 
     def append_links(self, output_path: str, links: list[LinkCandidate]) -> None:

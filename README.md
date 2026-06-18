@@ -282,6 +282,7 @@ video-dl "https://example.com/playlist/abc" -x --link-page-start 1 --link-page-e
 ```
 
 링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 명확한 광고/팝업 URL은 제외합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
+페이지별 수집 개수와 필터 통과 개수를 확인하려면 `--link-debug`를 붙입니다.
 
 ## 자주 쓰는 옵션
 
@@ -316,6 +317,7 @@ video-dl "https://example.com/playlist/abc" -x --link-page-start 1 --link-page-e
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-L`, `--links-output` | 추출한 링크를 저장할 텍스트 파일 |
 | `--link-page-start`, `--link-page-end` | 링크 추출 시 클릭할 페이지 번호 범위 |
+| `--link-debug` | 링크 추출 페이지별 raw/accepted 개수 출력 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |
 | `--allow-popups` | 새 탭/팝업 자동 차단 끄기 |

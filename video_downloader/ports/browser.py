@@ -49,5 +49,6 @@ class LinkExtractorPort(Protocol):
         block_devtool_detectors: bool = False,
         page_start: int | None = None,
         page_end: int | None = None,
+        debug: bool = False,
     ) -> list[LinkCandidate]:
         """Return likely video page links observed in a browser page."""

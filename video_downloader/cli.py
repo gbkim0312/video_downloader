@@ -279,6 +279,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Last pagination page number to click and extract when using --extract-links.",
     )
+    parser.add_argument(
+        "--link-debug",
+        action="store_true",
+        help="Print per-page link extraction counts to stderr.",
+    )
     return parser
 
 
@@ -456,6 +461,7 @@ def run_link_extraction(args: argparse.Namespace) -> int:
             block_devtool_detectors=args.block_devtool_detectors,
             page_start=page_start,
             page_end=page_end,
+            debug=args.link_debug,
         ),
     )
     if args.links_output:

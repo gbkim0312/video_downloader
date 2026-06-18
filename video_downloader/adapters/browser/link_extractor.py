@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 
 from .context import (
     browser_launch_options,
@@ -14,14 +15,46 @@ from video_downloader.domain.scoring import dedupe_links, score_link
 
 
 LINK_POLL_INTERVAL_SECONDS = 0.25
+SIGNATURE_HINTS = (
+    "watch",
+    "video",
+    "videos",
+    "play",
+    "player",
+    "episode",
+    "vod",
+    "lecture",
+    "course",
+    "media",
+)
 
 
 async def _collect_link_rows(page) -> list[dict]:
     return await page.locator("a[href]").evaluate_all(
         """anchors => anchors.map(anchor => {
-            const text = (anchor.innerText || anchor.getAttribute('aria-label') || anchor.title || '').trim();
-            const image = anchor.querySelector('img, picture, video, [style*="background-image"]');
-            const nearbyImage = anchor.closest('article, li, div')?.querySelector('img, picture, video, [style*="background-image"]');
+            const container = anchor.closest('article, li, [class*="item"], [class*="card"], [class*="post"], [class*="episode"], [class*="video"], div');
+            const text = (
+                anchor.innerText ||
+                anchor.getAttribute('aria-label') ||
+                anchor.title ||
+                container?.innerText ||
+                ''
+            ).trim();
+            const mediaSelector = [
+                'img',
+                'picture',
+                'video',
+                'source',
+                '[style*="background-image"]',
+                '[data-src]',
+                '[data-original]',
+                '[data-background]',
+                '[class*="thumb"]',
+                '[class*="poster"]',
+                '[class*="image"]'
+            ].join(',');
+            const image = anchor.querySelector(mediaSelector);
+            const nearbyImage = container?.querySelector(mediaSelector);
             return {
                 url: anchor.href,
                 text,
@@ -32,10 +65,27 @@ async def _collect_link_rows(page) -> list[dict]:
 
 
 def _rows_signature(rows: list[dict]) -> tuple[str, ...]:
+    signature_rows = [
+        row
+        for row in rows
+        if row.get("hasThumbnail")
+        or any(
+            hint in f"{row.get('url', '')} {row.get('text', '')}".lower()
+            for hint in SIGNATURE_HINTS
+        )
+    ]
+    if not signature_rows:
+        signature_rows = rows
     return tuple(
         f"{row.get('url', '')}\n{row.get('text', '')}"
-        for row in rows
+        for row in signature_rows
     )
+
+
+def _tag_rows(rows: list[dict], page_number: int) -> list[dict]:
+    for row in rows:
+        row["pageNumber"] = page_number
+    return rows
 
 
 async def _collect_stable_link_rows(page, wait_seconds: float) -> list[dict]:
@@ -169,6 +219,7 @@ async def _collect_paginated_link_rows(
     page_start: int,
     page_end: int,
     wait_seconds: float,
+    debug: bool,
 ) -> list[dict]:
     rows: list[dict] = []
     if page_start > 1:
@@ -181,7 +232,17 @@ async def _collect_paginated_link_rows(
         current_rows = await _collect_stable_link_rows(page, wait_seconds)
         current_signature = _rows_signature(current_rows)
         if current_signature and current_signature != previous_signature:
-            rows.extend(current_rows)
+            if debug:
+                print(
+                    f"link page {page_number}: raw={len(current_rows)}",
+                    file=sys.stderr,
+                )
+            rows.extend(_tag_rows(current_rows, page_number))
+        elif debug:
+            print(
+                f"link page {page_number}: skipped duplicate/empty raw={len(current_rows)}",
+                file=sys.stderr,
+            )
         previous_signature = current_signature
         if page_number < page_end:
             next_signature = await _advance_to_page(
@@ -191,6 +252,11 @@ async def _collect_paginated_link_rows(
                 wait_seconds,
             )
             if next_signature == current_signature:
+                if debug:
+                    print(
+                        f"link page {page_number}: could not advance to {page_number + 1}",
+                        file=sys.stderr,
+                    )
                 break
     return rows
 
@@ -210,6 +276,7 @@ async def _extract_links(
     block_devtool_detectors: bool,
     page_start: int | None,
     page_end: int | None,
+    debug: bool,
 ) -> list[LinkCandidate]:
     try:
         from playwright.async_api import async_playwright
@@ -271,16 +338,21 @@ async def _extract_links(
                     page_start=page_start,
                     page_end=page_end,
                     wait_seconds=wait_seconds,
+                    debug=debug,
                 )
             else:
-                rows = await _collect_stable_link_rows(page, wait_seconds)
+                rows = _tag_rows(await _collect_stable_link_rows(page, wait_seconds), 1)
         finally:
             await context.close()
             if browser is not None:
                 await browser.close()
 
     candidates = []
+    accepted_by_page: dict[int, int] = {}
+    raw_by_page: dict[int, int] = {}
     for row in rows:
+        page_number = int(row.get("pageNumber") or 1)
+        raw_by_page[page_number] = raw_by_page.get(page_number, 0) + 1
         link_url = row.get("url", "")
         if looks_like_ad_popup_url(link_url):
             continue
@@ -288,6 +360,7 @@ async def _extract_links(
         has_thumbnail = bool(row.get("hasThumbnail"))
         score = score_link(link_url, text, has_thumbnail, is_ad_url=False)
         if score >= min_score:
+            accepted_by_page[page_number] = accepted_by_page.get(page_number, 0) + 1
             candidates.append(
                 LinkCandidate(
                     url=link_url,
@@ -296,7 +369,20 @@ async def _extract_links(
                     score=score,
                 )
             )
-    return dedupe_links(candidates)
+    links = dedupe_links(candidates)
+    if debug:
+        for page_number in sorted(raw_by_page):
+            print(
+                "link page "
+                f"{page_number}: accepted={accepted_by_page.get(page_number, 0)} "
+                f"raw={raw_by_page[page_number]}",
+                file=sys.stderr,
+            )
+        print(
+            f"link extraction: accepted_total={len(candidates)} unique={len(links)}",
+            file=sys.stderr,
+        )
+    return links
 
 
 def extract_video_links(
@@ -314,6 +400,7 @@ def extract_video_links(
     block_devtool_detectors: bool = False,
     page_start: int | None = None,
     page_end: int | None = None,
+    debug: bool = False,
 ) -> list[LinkCandidate]:
     return asyncio.run(
         _extract_links(
@@ -330,6 +417,7 @@ def extract_video_links(
             block_devtool_detectors=block_devtool_detectors,
             page_start=page_start,
             page_end=page_end,
+            debug=debug,
         )
     )
 
@@ -351,6 +439,7 @@ class PlaywrightLinkExtractor:
         block_devtool_detectors: bool = False,
         page_start: int | None = None,
         page_end: int | None = None,
+        debug: bool = False,
     ) -> list[LinkCandidate]:
         return extract_video_links(
             url,
@@ -366,4 +455,5 @@ class PlaywrightLinkExtractor:
             block_devtool_detectors=block_devtool_detectors,
             page_start=page_start,
             page_end=page_end,
+            debug=debug,
         )
