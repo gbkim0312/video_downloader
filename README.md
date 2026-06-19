@@ -278,7 +278,7 @@ video-dl -i sites.txt -j 3
 `--link-page-end`만 주면 1페이지부터 지정한 페이지까지 추출합니다.
 
 ```bash
-video-dl "https://example.com/playlist/abc" -x --link-page-start 1 --link-page-end 5 -L sites.txt
+video-dl "https://example.com/playlist/abc" -x -B 1 -E 5 -L sites.txt
 ```
 
 링크 추출은 `<a>` 주변에 썸네일 이미지가 있거나 URL/텍스트에 `watch`, `video`, `episode`, `lecture` 같은 힌트가 있는지 점수화합니다. 명확한 광고/팝업 URL은 제외합니다. 너무 적게 나오면 `--link-min-score 4`처럼 낮추고, 너무 많이 나오면 값을 높이면 됩니다.
@@ -316,7 +316,7 @@ video-dl "https://example.com/playlist/abc" -x --link-page-start 1 --link-page-e
 | `--block-devtools`, `--block-devtool-detectors` | `disable-devtool` 같은 anti-devtools 스크립트 요청 차단 |
 | `-x`, `--extract-links` | 목록 페이지에서 영상 링크 추출 |
 | `-L`, `--links-output` | 추출한 링크를 저장할 텍스트 파일 |
-| `--link-page-start`, `--link-page-end` | 링크 추출 시 클릭할 페이지 번호 범위 |
+| `-B`, `--link-page-start` / `-E`, `--link-page-end` | 링크 추출 시 클릭할 페이지 번호 범위 |
 | `--link-debug` | 링크 추출 페이지별 raw/accepted 개수 출력 |
 | `-q`, `--quiet` | 출력 줄이기 |
 | `--allow-short` | 짧다는 이유만으로 제외된 스트림 허용 |

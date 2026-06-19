@@ -268,12 +268,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to wait after opening a link extraction page.",
     )
     parser.add_argument(
+        "-B",
         "--link-page-start",
         type=int,
         default=None,
         help="First pagination page number to click and extract when using --extract-links.",
     )
     parser.add_argument(
+        "-E",
         "--link-page-end",
         type=int,
         default=None,
